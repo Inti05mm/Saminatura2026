@@ -1,0 +1,84 @@
+/* Primero importa las fuentes */
+@import url('https://fonts.googleapis.com/css2?family=Lavishly+Yours&family=MonteCarlo&family=Sirivennela&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Text:ital@0;1&family=Lavishly+Yours&family=MonteCarlo&family=Sirivennela&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+
+@import "tailwindcss";
+
+/* Tus colores personalizados */
+.verde-1 { background-color: #354024; color: white; }
+.verde-2 { background-color: #425530; color: white; }
+.verde-3 { background-color: #c1ce9c; color: white; }
+.gris {background-color: #f3f4f6; color: black}
+
+.text-verde-1 { color: #354024; }
+.text-verde-2 { color: #425530; }
+.text-verde-3 { color: #c1ce9c; }
+
+/* Tus componentes personalizados de Tailwind */
+@layer components {
+
+  .montecarlo-regular {
+    font-family: "MonteCarlo", cursive;
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  .cookie-regular {
+  font-family: "Cookie", cursive;
+  font-weight: 400;
+  font-style: normal;
+}
+
+.stix-two-text-100 {
+  font-family: "STIX Two Text", serif;
+  font-optical-sizing: auto;
+  font-weight: 100;
+  font-style: normal;
+}
+
+
+  .lavishly-yours-regular {
+    font-family: "Lavishly Yours", cursive;
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  .sirivennela-regular {
+    font-family: "Sirivennela", sans-serif;
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  .dm-serif-text-regular {
+    font-family: "DM Serif Text", serif;
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  .dm-serif-text-regular-italic {
+    font-family: "DM Serif Text", serif;
+    font-weight: 400;
+    font-style: italic;
+  }
+
+  
+  .roboto {
+    font-family: "Roboto", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 300;
+    font-style: normal;
+    font-variation-settings:
+      "wdth" 100;
+  }
+
+   .roboto-title {
+    font-family: "Roboto", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-style: normal;
+    font-variation-settings:
+      "wdth" 100;
+  }
+
+}
