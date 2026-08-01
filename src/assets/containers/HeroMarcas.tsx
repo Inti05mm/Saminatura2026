@@ -18,110 +18,140 @@ const HeroMarcas: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // ✅ Cargar marcas desde Supabase (con fallback + error visible)
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
 
     const mapRows = (rows: any[] | null): Brand[] =>
       (rows ?? [])
-        .filter((r) => r && r.id != null && r.name && r.image_url)
-        .map((r) => ({
-          id: Number(r.id),
-          name: String(r.name),
-          image: String(r.image_url),
+        .filter(
+          (row) =>
+            row &&
+            row.id != null &&
+            row.name &&
+            row.image_url
+        )
+        .map((row) => ({
+          id: Number(row.id),
+          name: String(row.name),
+          image: String(row.image_url),
         }));
 
     const loadBrands = async () => {
       setLoading(true);
       setLoadError(null);
 
-      // 1) Intento “ideal” (activas + orden)
-      const q1 = await supabase
-        .from("brands")
-        .select("id, name, image_url, is_active, sort_order, created_at")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true });
+      try {
+        /*
+          Este is_active pertenece a la tabla brands.
+          No tiene relación con isgood o is_discontinued de products.
+        */
+        const { data, error } = await supabase
+          .from("brands")
+          .select(
+            "id, name, image_url, is_active, sort_order, created_at"
+          )
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true });
 
-      if (cancelled) return;
+        if (!alive) return;
 
-      if (!q1.error) {
-        const mapped = mapRows(q1.data as any[] | null);
-        setBrands(mapped);
+        if (error) {
+          console.error("Error cargando marcas:", error);
+
+          setBrands([]);
+          setLoadError(
+            `No se pudieron cargar las marcas. ${error.message}`
+          );
+          return;
+        }
+
+        const mappedBrands = mapRows(data as any[] | null);
+
+        setBrands(mappedBrands);
         setOffset(0);
-        setLoading(false);
-        return;
-      }
 
-      // 2) Fallback: por si la policy/columnas no dejan filtrar u ordenar
-      console.error("Brands query (ideal) error:", q1.error);
-      const q2 = await supabase.from("brands").select("id, name, image_url");
+        if (mappedBrands.length === 0) {
+          setLoadError(
+            "No hay marcas activas para mostrar."
+          );
+        }
+      } catch (error: any) {
+        if (!alive) return;
 
-      if (cancelled) return;
+        console.error("Error inesperado cargando marcas:", error);
 
-      if (q2.error) {
-        console.error("Brands query (fallback) error:", q2.error);
         setBrands([]);
         setLoadError(
-          `No se pudieron cargar marcas. Error: ${q2.error.message} (code: ${q2.error.code ?? "?"})`
+          error?.message ??
+            "Se produjo un error cargando las marcas."
         );
-        setLoading(false);
-        return;
-      }
-
-      const mapped2 = mapRows(q2.data as any[] | null);
-      setBrands(mapped2);
-      setOffset(0);
-      setLoading(false);
-
-      // Si el fallback devolvió 0, probablemente es RLS/policy para anon
-      if (mapped2.length === 0) {
-        setLoadError(
-          "No llegan marcas desde Supabase. Si en la tabla sí hay filas, casi seguro es RLS/policy para anon (lectura pública)."
-        );
+      } finally {
+        if (alive) {
+          setLoading(false);
+        }
       }
     };
 
-    loadBrands();
+    void loadBrands();
 
     return () => {
-      cancelled = true;
+      alive = false;
     };
   }, []);
 
-  // ✅ Animación (solo si hay algo que mover)
   useEffect(() => {
     if (brands.length === 0) return;
 
     let animationFrame: number;
 
     const animate = () => {
-      setOffset((prev) => (prev <= -50 ? 0 : prev - speed));
-      animationFrame = requestAnimationFrame(animate);
+      setOffset((previous) =>
+        previous <= -50 ? 0 : previous - speed
+      );
+
+      animationFrame = window.requestAnimationFrame(animate);
     };
 
-    animationFrame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationFrame);
+    animationFrame = window.requestAnimationFrame(animate);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
   }, [brands.length]);
 
   const loopBrands = useMemo(() => {
-    if (brands.length <= 6) return [...brands, ...brands, ...brands];
+    if (brands.length <= 6) {
+      return [...brands, ...brands, ...brands];
+    }
+
     return [...brands, ...brands];
   }, [brands]);
 
+  const openBrand = (brandName: string) => {
+    const params = new URLSearchParams({
+      brand: brandName,
+    });
+
+    navigate(`/shopping?${params.toString()}#products`);
+  };
+
   return (
-    <section className="w-full py-12 pb-16 overflow-hidden bg-white">
-      <h2 className="text-2xl md:text-3xl font-bold text-center mb-10 text-gray-800">
+    <section className="w-full overflow-hidden bg-white py-12 pb-16">
+      <h2 className="mb-10 text-center text-2xl font-bold text-gray-800 md:text-3xl">
         Descubre nuestras marcas
       </h2>
 
       {loading ? (
-        <div className="text-center text-gray-500">Cargando marcas...</div>
+        <div className="text-center text-gray-500">
+          Cargando marcas...
+        </div>
       ) : brands.length === 0 ? (
-        <div className="text-center text-gray-500 px-4">
+        <div className="px-4 text-center text-gray-500">
           <p>Aún no hay marcas para mostrar.</p>
+
           {loadError && (
-            <p className="mt-2 text-xs text-red-600 whitespace-pre-wrap">
+            <p className="mt-2 whitespace-pre-wrap text-xs text-red-600">
               {loadError}
             </p>
           )}
@@ -129,14 +159,14 @@ const HeroMarcas: React.FC = () => {
       ) : (
         <>
           {loadError && (
-            <div className="text-center px-4 mb-4">
-              <p className="text-xs text-amber-700 whitespace-pre-wrap">
+            <div className="mb-4 px-4 text-center">
+              <p className="whitespace-pre-wrap text-xs text-amber-700">
                 {loadError}
               </p>
             </div>
           )}
 
-          <div className="relative w-full overflow-hidden pb-4 mx-10">
+          <div className="relative mx-10 w-full overflow-hidden pb-4">
             <div
               className="flex gap-3"
               style={{
@@ -148,23 +178,25 @@ const HeroMarcas: React.FC = () => {
                 <button
                   key={`${brand.id}-${index}`}
                   type="button"
-                  className="shrink-0 w-20 md:w-24 -mr-1 cursor-pointer"
+                  className="-mr-1 w-20 shrink-0 cursor-pointer md:w-24"
                   title={brand.name}
                   aria-label={`Ver productos de la marca ${brand.name}`}
-                  onClick={() => {
-                    const params = new URLSearchParams({ brand: brand.name });
-                    navigate(`/shopping?${params.toString()}`);
-                  }}
+                  onClick={() => openBrand(brand.name)}
                 >
-                  <div className="w-20 h-20 md:w-24 md:h-24 rounded-full verde-3 shadow-md overflow-hidden flex items-center justify-center hover:scale-[1.03] active:scale-[0.99] transition-transform">
+                  <div className="verde-3 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full shadow-md transition-transform hover:scale-[1.03] active:scale-[0.99] md:h-24 md:w-24">
                     <img
                       src={brand.image}
                       alt={brand.name}
-                      className="w-full h-full object-contain p-3"
+                      className="h-full w-full object-contain p-3"
                       loading="lazy"
-                      onError={(e) => {
-                        console.log("IMG ERROR:", brand.name, brand.image);
-                        (e.currentTarget as HTMLImageElement).src =
+                      onError={(event) => {
+                        console.error(
+                          "Error cargando imagen de marca:",
+                          brand.name,
+                          brand.image
+                        );
+
+                        event.currentTarget.src =
                           "https://via.placeholder.com/150";
                       }}
                     />

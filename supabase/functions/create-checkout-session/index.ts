@@ -51,6 +51,8 @@ Deno.serve(async (req) => {
 
   // 🧩 Id de request para detectar llamadas dobles
   const reqId = crypto.randomUUID();
+  let orderIdForReservationCleanup: string | null = null;
+  let reservationDone = false;
 
   try {
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
@@ -230,7 +232,7 @@ const { data: products, error: pErr } = await supabaseAdmin
 
       const { data: orderRow, error: oReadErr } = await supabaseAdmin
         .from("orders")
-        .select("id, user_id, guest_token, status, shipping_amount, shipping_method")
+        .select("id, user_id, guest_token, status, shipping_amount, shipping_method, stock_reserved, stock_released")
         .eq("id", orderIdFromClient)
         .single();
 
@@ -363,6 +365,45 @@ const itemsToInsert = cartItems.map((ci) => {
 
       console.log(`[${reqId}] ✅ ORDER ITEMS CREATED (${payload.length})`);
     } else {
+      // ✅ Si este pedido pendiente ya tenía stock reservado de un intento anterior,
+      // lo liberamos antes de refrescar order_items. Luego se vuelve a reservar
+      // con el carrito actual justo antes de crear Stripe Checkout.
+      const { data: currentOrderBeforeRefresh, error: currentOrderErr } = await supabaseAdmin
+        .from("orders")
+        .select("id, stock_reserved, stock_released")
+        .eq("id", orderId)
+        .single();
+
+      if (currentOrderErr || !currentOrderBeforeRefresh) {
+        console.error(`[${reqId}] Failed to read order before refresh`, currentOrderErr);
+        return new Response(JSON.stringify({ error: "Failed to read order before refresh" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (currentOrderBeforeRefresh.stock_reserved && !currentOrderBeforeRefresh.stock_released) {
+        console.log(`[${reqId}] Releasing previous reservation before refreshing items`);
+
+        const { error: releaseErr } = await supabaseAdmin.rpc("release_online_stock_for_order", {
+          p_order_id: orderId,
+        });
+
+        if (releaseErr) {
+          console.error(`[${reqId}] Failed to release previous reservation`, releaseErr);
+          return new Response(JSON.stringify({ error: `Failed to release previous reservation: ${releaseErr.message}` }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Dejamos el pedido preparado para una nueva reserva con los items actuales.
+      await supabaseAdmin
+        .from("orders")
+        .update({ stock_reserved: false, stock_released: false })
+        .eq("id", orderId);
+
       // ✅ Update seguro:
       // - NO tocamos user_id / guest_token (evita borrar ownership)
       // - NO pisamos shipping_address con null si no viene
@@ -421,7 +462,33 @@ const itemsToInsert = cartItems.map((ci) => {
       console.log(`[${reqId}] ✅ ORDER ITEMS REFRESHED (${payload.length})`);
     }
 
-    // 9) Stripe line items
+    // 9) Reservar stock online ANTES de crear la sesión de Stripe.
+    // Esto evita que dos clientes compren las mismas unidades a la vez.
+    // La función SQL debe:
+    // - bloquear pedido/productos
+    // - comprobar stock visible disponible
+    // - sumar online_reserved_stock
+    // - recalcular products.stock = firesoft_stock - online_reserved_stock - online_stock_buffer
+    console.log(`[${reqId}] 📦 RESERVING ONLINE STOCK FOR ORDER:`, orderId);
+
+    const { error: reserveErr } = await supabaseAdmin.rpc("reserve_online_stock_for_order", {
+      p_order_id: orderId,
+    });
+
+    if (reserveErr) {
+      console.error(`[${reqId}] reserve_online_stock_for_order error:`, reserveErr);
+
+      return new Response(JSON.stringify({ error: `No hay stock suficiente: ${reserveErr.message}` }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    reservationDone = true;
+    orderIdForReservationCleanup = orderId;
+    console.log(`[${reqId}] ✅ ONLINE STOCK RESERVED`);
+
+    // 10) Stripe line items
     const lineItems: any[] = itemsToInsert.map((it) => ({
       price_data: {
         currency: "eur",
@@ -462,16 +529,39 @@ const itemsToInsert = cartItems.map((ci) => {
     console.log(`[${reqId}] FINAL shipping_address:`, shippingAddr);
     console.log(`[${reqId}] METADATA:`, metadata);
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: lineItems,
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata,
+    let session: Stripe.Checkout.Session;
 
-      // ✅ Para que Stripe también tenga email (y recibo):
-      customer_email: customerEmail,
-    });
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: lineItems,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata,
+
+        // ✅ Para que Stripe también tenga email (y recibo):
+        customer_email: customerEmail,
+      });
+    } catch (stripeErr: any) {
+      console.error(`[${reqId}] Stripe session create failed:`, stripeErr?.message ?? stripeErr);
+
+      // Si Stripe falla después de reservar, liberamos la reserva para no bloquear stock.
+      if (reservationDone && orderIdForReservationCleanup) {
+        await supabaseAdmin.rpc("release_online_stock_for_order", {
+          p_order_id: orderIdForReservationCleanup,
+        });
+
+        await supabaseAdmin
+          .from("orders")
+          .update({ stock_reserved: false, stock_released: true })
+          .eq("id", orderIdForReservationCleanup);
+      }
+
+      return new Response(JSON.stringify({ error: "Failed to create Stripe session" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // 11) Guardar stripe_session_id en orders
     await supabaseAdmin.from("orders").update({ stripe_session_id: session.id }).eq("id", orderId);
@@ -493,6 +583,19 @@ const itemsToInsert = cartItems.map((ci) => {
     );
   } catch (e: any) {
     console.error(`[${reqId}] create-checkout-session error:`, e);
+
+    // Seguridad extra: si algo explota después de reservar, liberamos la reserva.
+    if (reservationDone && orderIdForReservationCleanup) {
+      try {
+        await createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!).rpc(
+          "release_online_stock_for_order",
+          { p_order_id: orderIdForReservationCleanup }
+        );
+      } catch (cleanupErr) {
+        console.error(`[${reqId}] cleanup reservation error:`, cleanupErr);
+      }
+    }
+
     return new Response(JSON.stringify({ error: e?.message ?? "Server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

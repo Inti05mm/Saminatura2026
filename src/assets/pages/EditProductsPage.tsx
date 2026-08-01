@@ -1,15 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Header from "../containers/Header";
 import AdminSidebar from "../containers/AdminSidebar";
 
 import AdminProductsManager from "../containers/AdminProductManager";
+import AdminProductReviewContainer from "../containers/AdminProductReviewContainer";
 
-// ✅ placeholders (te los dejo abajo)
 import AdminExpiryPanel from "../containers/AdminExpiryPanel";
 import AdminStockPanel from "../containers/AdminStockPanel";
 
 const SECTIONS = [
   { id: "productos", label: "Lista productos" },
+  { id: "revision", label: "Revisión pendientes" },
   { id: "caducidad", label: "Caducidad" },
   { id: "stock", label: "Stock / Alertas" },
 ] as const;
@@ -17,7 +18,10 @@ const SECTIONS = [
 export default function EditProductsPage() {
   const [activeId, setActiveId] = useState<string>("productos");
 
-  const items = useMemo(() => SECTIONS.map((s) => ({ id: s.id, label: s.label })), []);
+  const items = useMemo(
+    () => SECTIONS.map((s) => ({ id: s.id, label: s.label })),
+    []
+  );
 
   const goTo = (id: string) => {
     const el = document.getElementById(id);
@@ -25,13 +29,15 @@ export default function EditProductsPage() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Detectar sección visible (para resaltar botón)
   useEffect(() => {
     const obs = new IntersectionObserver(
       (entries) => {
         const visible = entries
           .filter((e) => e.isIntersecting)
-          .sort((a, b) => (b.intersectionRatio ?? 0) - (a.intersectionRatio ?? 0))[0];
+          .sort(
+            (a, b) =>
+              (b.intersectionRatio ?? 0) - (a.intersectionRatio ?? 0)
+          )[0];
 
         if (visible?.target?.id) setActiveId(visible.target.id);
       },
@@ -50,13 +56,15 @@ export default function EditProductsPage() {
     <main className="min-h-screen gris">
       <Header />
 
-      {/* ✅ nav sticky */}
       <AdminSidebar items={items} activeId={activeId} onGo={goTo} />
 
-      {/* ✅ contenido */}
-      <div className="mx-auto max-w-7xl px-4 py-8 space-y-16">
+      <div className="mx-auto px-4 py-8 space-y-16">
         <section id="productos" className="scroll-mt-32">
           <AdminProductsManager />
+        </section>
+
+        <section id="revision" className="scroll-mt-32">
+          <AdminProductReviewContainer />
         </section>
 
         <section id="caducidad" className="scroll-mt-32">

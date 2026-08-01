@@ -441,6 +441,48 @@ Deno.serve(async (req) => {
     const body = await req.text();
     const event = await stripe.webhooks.constructEventAsync(body, sig, webhookSecret);
 
+    if (event.type === "checkout.session.expired") {
+      const session: any = event.data.object;
+      const orderId = session?.metadata?.order_id;
+
+      if (!orderId) {
+        console.warn("checkout.session.expired without metadata.order_id", { sessionId: session?.id });
+        return new Response(JSON.stringify({ received: true, warn: "missing order_id" }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Si el cliente abandona Stripe o la sesión caduca, liberamos la reserva online.
+      const { error: releaseErr } = await supabaseAdmin.rpc("release_online_stock_for_order", {
+        p_order_id: orderId,
+      });
+
+      if (releaseErr) {
+        console.error("release_online_stock_for_order error:", releaseErr);
+        return new Response(JSON.stringify({ error: "Release stock reservation failed" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      await supabaseAdmin
+        .from("orders")
+        .update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq("id", orderId)
+        .eq("status", "pending");
+
+      console.log("Expired checkout released stock reservation:", { orderId, sessionId: session?.id });
+
+      return new Response(JSON.stringify({ received: true }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (event.type === "checkout.session.completed") {
       const session: any = event.data.object;
 

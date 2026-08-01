@@ -54,6 +54,30 @@ type Product = {
 
 const FALLBACK_IMG = "https://placehold.co/900x900?text=Sin+imagen";
 
+type FeatureTone = "bio" | "vegan" | "gluten_free" | "lactose_free";
+
+const FEATURE_BADGE_STYLES: Record<
+  FeatureTone,
+  { chip: string; dot: string }
+> = {
+  bio: {
+    chip: "border-emerald-200 bg-white/90 text-emerald-800 backdrop-blur-sm",
+    dot: "bg-emerald-500",
+  },
+  vegan: {
+    chip: "border-lime-200 bg-white/90 text-lime-800 backdrop-blur-sm",
+    dot: "bg-lime-500",
+  },
+  gluten_free: {
+    chip: "border-amber-200 bg-white/90 text-amber-800 backdrop-blur-sm",
+    dot: "bg-amber-500",
+  },
+  lactose_free: {
+    chip: "border-violet-200 bg-white/90 text-violet-800 backdrop-blur-sm",
+    dot: "bg-violet-500",
+  },
+};
+
 function getPromoInfo(p: Product) {
   if (p.promo_active) {
     if (p.promo_type === "2x1") {
@@ -124,7 +148,7 @@ function normalizeExtraInfoRow(data: any): ProductExtraInfoData {
     allergens: data?.allergens ?? null,
     usage_tips: data?.usage_tips ?? null,
     medical_disclaimer: data?.medical_disclaimer ?? null,
-    storage_instructions: data?.storage_instructions ?? null,
+    legal_regulation: data?.legal_regulation ?? null,
   };
 }
 
@@ -204,10 +228,7 @@ export default function ProductDetail() {
 
   const [added, setAdded] = useState(false);
 
-  const descBoxRef = useRef<HTMLDivElement | null>(null);
-  const descTextRef = useRef<HTMLDivElement | null>(null);
   const [descExpanded, setDescExpanded] = useState(false);
-  const [showMore, setShowMore] = useState(false);
 
   const thumbsRef = useRef<HTMLDivElement | null>(null);
   const [activeImgIdx, setActiveImgIdx] = useState(0);
@@ -272,7 +293,7 @@ export default function ProductDetail() {
           allergens,
           usage_tips,
           medical_disclaimer,
-          storage_instructions
+          legal_regulation
         `)
         .eq("product_id", id)
         .maybeSingle();
@@ -296,6 +317,8 @@ export default function ProductDetail() {
 
       setLoadingPage(true);
 
+      // public_products ya devuelve únicamente productos:
+      // isgood = true, is_active = true e is_discontinued = false.
       const { data, error } = await supabase
         .from("public_products")
         .select(`
@@ -304,7 +327,7 @@ export default function ProductDetail() {
   promo_type, promo_active,
   img, description, stock,
   bio, vegan, gluten_free, lactose_free,
-  is_active, expiration_date,
+  expiration_date,
   flavor, size
 `)
         .eq("id", productId)
@@ -347,6 +370,8 @@ export default function ProductDetail() {
         navigate(`/shopping/${canonicalSlug}`, { replace: true });
       }
 
+      // Las variantes también se consultan desde public_products,
+      // por lo que solo pueden aparecer variantes públicas.
       const { data: vData, error: vErr } = await supabase
   .from("public_products")
   .select(`
@@ -355,10 +380,9 @@ export default function ProductDetail() {
     promo_type, promo_active,
     img, description, stock,
     bio, vegan, gluten_free, lactose_free,
-    is_active, expiration_date,
+    expiration_date,
     flavor, size
   `)
-        .eq("is_active", true)
         .eq("name", prod.name)
         .eq("brand", prod.brand)
         .eq("category", prod.category)
@@ -428,29 +452,6 @@ export default function ProductDetail() {
   }, [productId, slug, navigate]);
 
   useEffect(() => {
-    if (!product?.description?.trim()) {
-      setShowMore(false);
-      setDescExpanded(false);
-      return;
-    }
-
-    const t = window.setTimeout(() => {
-      if (descExpanded) {
-        setShowMore(true);
-        return;
-      }
-
-      const box = descBoxRef.current;
-      const text = descTextRef.current;
-      if (!box || !text) return;
-
-      setShowMore(text.scrollHeight > box.clientHeight + 2);
-    }, 80);
-
-    return () => window.clearTimeout(t);
-  }, [product?.description, descExpanded]);
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (zoomOpen) return;
       if (e.key === "ArrowLeft") prevImg();
@@ -486,55 +487,60 @@ export default function ProductDetail() {
   };
 
   const goToVariant = async (p: Product) => {
-    setDescExpanded(false);
-    setAdded(false);
+  if (p.id === product?.id) return;
 
-    if (p.id === product?.id) return;
+  setDescExpanded(false);
+  setAdded(false);
+  setZoomOpen(false);
+  setActiveImgIdx(0);
 
-    const existingExtraInfo =
-      p.extraInfo ??
-      variants.find((v) => v.id === p.id)?.extraInfo ??
-      null;
+  const existingExtraInfo =
+    p.extraInfo ??
+    variants.find((v) => v.id === p.id)?.extraInfo ??
+    null;
 
-    if (existingExtraInfo) {
-      setProduct({
-        ...p,
-        extraInfo: existingExtraInfo,
-      });
-    } else {
-      const { data, error } = await supabase
-        .from("product_extra_info")
-        .select(`
-          ingredients,
-          nutritional_info,
-          usage_instructions,
-          warnings,
-          allergens,
-          usage_tips,
-          medical_disclaimer,
-          storage_instructions
-        `)
-        .eq("product_id", p.id)
-        .maybeSingle();
+  if (existingExtraInfo) {
+    setProduct({
+      ...p,
+      extraInfo: existingExtraInfo,
+    });
+  } else {
+    const { data, error } = await supabase
+      .from("product_extra_info")
+      .select(`
+        ingredients,
+        nutritional_info,
+        usage_instructions,
+        warnings,
+        allergens,
+        usage_tips,
+        medical_disclaimer,
+        legal_regulation
+      `)
+      .eq("product_id", p.id)
+      .maybeSingle();
 
-      const extraInfo =
-        !error && data ? normalizeExtraInfoRow(data) : null;
+    const extraInfo = !error && data ? normalizeExtraInfoRow(data) : null;
 
-      setProduct({
-        ...p,
-        extraInfo,
-      });
+    setProduct({
+      ...p,
+      extraInfo,
+    });
 
-      setVariants((prev) =>
-        prev.map((item) =>
-          item.id === p.id ? { ...item, extraInfo } : item
-        )
-      );
-    }
+    setVariants((prev) =>
+      prev.map((item) =>
+        item.id === p.id ? { ...item, extraInfo } : item
+      )
+    );
+  }
 
-    const canonical = makeCanonicalSlug(p);
-    navigate(`/shopping/${canonical}`);
-  };
+  const canonical = makeCanonicalSlug(p);
+
+  // Importante:
+  // Esto cambia la URL SIN hacer navigate de React Router.
+  // Así no se recarga toda la página ni vuelve a salir "Cargando producto…".
+  window.history.pushState(null, "", `/shopping/${canonical}`);
+};
 
   if (loadingPage) {
     return (
@@ -572,14 +578,14 @@ export default function ProductDetail() {
   const stockInfo = getStockLabel(product.stock);
   const outOfStock = product.stock !== null && product.stock <= 0;
 
-  const cornerBadges: Array<{ text: string; className: string }> = [
-    ...(product.bio ? [{ text: "Bio", className: "bg-emerald-600 text-white border border-white/30" }] : []),
-    ...(product.vegan ? [{ text: "Vegan", className: "bg-green-700 text-white border border-white/30" }] : []),
+  const cornerBadges: Array<{ text: string; tone: FeatureTone }> = [
+    ...(product.bio ? [{ text: "Bio", tone: "bio" as const }] : []),
+    ...(product.vegan ? [{ text: "Vegan", tone: "vegan" as const }] : []),
     ...(product.gluten_free
-      ? [{ text: "Sin gluten", className: "bg-sky-700 text-white border border-white/30" }]
+      ? [{ text: "Sin gluten", tone: "gluten_free" as const }]
       : []),
     ...(product.lactose_free
-      ? [{ text: "Sin lactosa", className: "bg-indigo-700 text-white border border-white/30" }]
+      ? [{ text: "Sin lactosa", tone: "lactose_free" as const }]
       : []),
   ];
 
@@ -610,14 +616,22 @@ export default function ProductDetail() {
 
               {cornerBadges.length > 0 && (
                 <div className="absolute top-5 right-5 z-10 flex flex-wrap justify-end gap-2 max-w-[260px]">
-                  {cornerBadges.map((b) => (
-                    <span
-                      key={b.text}
-                      className={["px-3 py-1 rounded-full text-xs font-extrabold shadow-lg", b.className].join(" ")}
-                    >
-                      {b.text}
-                    </span>
-                  ))}
+                  {cornerBadges.map((b) => {
+                    const styles = FEATURE_BADGE_STYLES[b.tone];
+
+                    return (
+                      <span
+                        key={b.text}
+                        className={[
+                          "inline-flex items-center gap-2.5 rounded-full border px-5 py-2.5 text-sm font-semibold shadow-sm",
+                          styles.chip,
+                        ].join(" ")}
+                      >
+                        <span className={["h-2 w-2 rounded-full", styles.dot].join(" ")} />
+                        {b.text}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
 
@@ -714,18 +728,29 @@ export default function ProductDetail() {
               </div>
             </div>
 
-            <div className="border border-gray-200 bg-white p-6 rounded-3xl my-5">
-              <span className="text-xs uppercase tracking-wide text-gray-400">{product.category}</span>
+            <div
+              className="my-5 rounded-[28px] border border-gray-200/80 bg-white p-6 md:p-8 xl:p-10 shadow-[0_18px_55px_rgba(17,24,39,0.06)]"
+              style={{ fontFamily: '"Inter", sans-serif' }}
+            >
+              <div className="flex items-center gap-3">
+                <span className="h-px w-8 bg-gray-300" />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                  {product.category}
+                </span>
+              </div>
 
-              <h1 className="font-mono mt-2 text-3xl md:text-4xl font-extrabold leading-tight text-gray-900">
+              <h1
+  className="mt-5 text-[2rem] md:text-[2.65rem] font-semibold tracking-[-0.035em] leading-[1.08] text-gray-950"
+  style={{ fontFamily: '"Inter", sans-serif' }}
+>
                 {displayName}
               </h1>
 
-              <p className="mt-2 text-lg text-gray-500">{product.brand}</p>
+              <p className="mt-3 text-[15px] font-medium text-gray-500">{product.brand}</p>
 
               {(product.flavor || product.size) && (
                 <div className="mt-3">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 text-gray-800 px-3 py-1 text-xs font-semibold">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3.5 py-1.5 text-xs font-semibold text-gray-700">
                     {variantLabel(product)}
                   </span>
                 </div>
@@ -733,31 +758,32 @@ export default function ProductDetail() {
 
               {promo && <p className="mt-4 text-sm font-semibold text-[#8c0327]">{promo.text}</p>}
 
-              <div className="mt-7 flex items-end gap-4">
+              <div className="mt-8 flex items-end gap-4 border-y border-gray-100 py-6">
                 {product.old_price !== null && product.old_price > product.price && (
                   <span className="line-through text-gray-400 text-xl">
                     {product.old_price.toFixed(2)}€
                   </span>
                 )}
-                <span className="text-4xl font-extrabold text-gray-900">
-                  {product.price.toFixed(2)}€
-                </span>
+                <span
+  className="text-[2.55rem] font-semibold tracking-[-0.04em] text-gray-950"
+  style={{ fontFamily: '"Inter", sans-serif' }}
+>
+  {product.price.toFixed(2)}€
+</span>
               </div>
 
-              <div className="flex flex-wrap gap-2 mt-5">
-                {product.bio && <Badge text="Bio" />}
-                {product.vegan && <Badge text="Vegan" />}
-                {product.gluten_free && <Badge text="Sin gluten" />}
-                {product.lactose_free && <Badge text="Sin lactosa" />}
+              <div className="mt-5 flex flex-wrap gap-2">
+                {product.bio && <Badge text="Bio" tone="bio" />}
+                {product.vegan && <Badge text="Vegan" tone="vegan" />}
+                {product.gluten_free && <Badge text="Sin gluten" tone="gluten_free" />}
+                {product.lactose_free && <Badge text="Sin lactosa" tone="lactose_free" />}
                 <Badge text={stockInfo.text} danger={stockInfo.danger} />
               </div>
 
               {hasVariants && (
-                <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
-                  <div className="text-sm font-bold text-gray-900">Elige una opción</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Mismo producto ({product.name}) en otros sabores/tamaños
-                  </div>
+                <div className="mt-7 rounded-2xl border border-gray-200 bg-gray-50/70 p-5">
+                  <div className="text-sm font-semibold text-gray-900">Elige otra opción</div>
+                  
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     {variants
@@ -779,10 +805,10 @@ export default function ProductDetail() {
                             onClick={() => goToVariant(v)}
                             disabled={selected}
                             className={[
-                              "px-3 py-2 rounded-full text-sm border transition",
+                              "rounded-full border px-3.5 py-2 text-sm font-medium transition",
                               selected
-                                ? "bg-black text-white border-black cursor-default"
-                                : "bg-white text-gray-900 border-gray-300 hover:bg-gray-50",
+                                ? "border-gray-950 bg-gray-950 text-white cursor-default"
+                                : "border-gray-200 bg-white text-gray-800 hover:border-gray-400",
                               disabled && !selected ? "opacity-60" : "",
                             ].join(" ")}
                             title={disabled ? "Fuera de stock" : "Ver opción"}
@@ -798,32 +824,40 @@ export default function ProductDetail() {
 
               {product.description?.trim() ? (
                 <div className="mt-7">
-                  <h3 className="font-semibold text-gray-900 text-lg">Descripción</h3>
+                  <h3 className="text-base font-semibold text-gray-950">
+                    Descripción
+                  </h3>
 
-                  <div
-                    ref={descBoxRef}
-                    className={[
-                      "relative mt-3 rounded-2xl border border-gray-100 bg-gray-50 p-5",
-                      descExpanded ? "max-h-none" : "max-h-[260px] overflow-hidden",
-                    ].join(" ")}
-                  >
-                    <div ref={descTextRef} className="text-gray-700 leading-7 whitespace-pre-line">
+                  <div className="relative mt-3 overflow-hidden rounded-2xl border border-gray-200/80 bg-white">
+                    <div
+                      id="product-description"
+                      className={[
+                        "px-5 pt-5 text-[15px] leading-7 text-gray-600 whitespace-pre-line transition-[max-height] duration-500 ease-in-out",
+                        descExpanded
+                          ? "max-h-[3000px] pb-5"
+                          : "max-h-[210px] overflow-hidden pb-12",
+                      ].join(" ")}
+                    >
                       {product.description}
                     </div>
 
-                    {!descExpanded && showMore && (
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-gray-50 to-transparent" />
-                    )}
-
-                    {!descExpanded && showMore && (
-                      <div className="absolute inset-x-0 bottom-2 flex justify-center">
+                    {!descExpanded && (
+                      <div className="absolute inset-x-0 bottom-0 flex h-24 items-end justify-center bg-gradient-to-t from-white via-white/95 to-transparent pb-3">
                         <button
                           type="button"
                           onClick={() => setDescExpanded(true)}
-                          aria-label="Ver más"
-                          className="pointer-events-auto h-10 w-10 rounded-full border border-gray-200 bg-white/95 shadow-sm flex items-center justify-center hover:bg-white active:scale-95 transition"
+                          aria-expanded={descExpanded}
+                          aria-controls="product-description"
+                          className="group flex items-center gap-2 rounded-full border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-800 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 active:scale-95"
                         >
-                          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          
+
+                          <svg
+                            className="h-4 w-4 transition-transform duration-300 group-hover:translate-y-0.5"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
                             <path
                               fillRule="evenodd"
                               d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08z"
@@ -835,14 +869,22 @@ export default function ProductDetail() {
                     )}
                   </div>
 
-                  {showMore && descExpanded && (
+                  {descExpanded && (
                     <button
                       type="button"
                       onClick={() => setDescExpanded(false)}
-                      aria-label="Ver menos"
-                      className="mt-3 mx-auto flex items-center justify-center h-10 w-10 rounded-full border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 active:scale-95 transition"
+                      aria-expanded={descExpanded}
+                      aria-controls="product-description"
+                      className="mx-auto mt-3 flex items-center gap-2 rounded-full border border-gray-200 bg-white px-5 py-2 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 active:scale-95"
                     >
-                      <svg className="h-5 w-5 rotate-180" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    
+
+                      <svg
+                        className="h-4 w-4 rotate-180"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
                         <path
                           fillRule="evenodd"
                           d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08z"
@@ -861,7 +903,7 @@ export default function ProductDetail() {
                 />
               </div>
 
-              <div className="pt-7 mt-7 flex gap-3">
+              <div className="mt-8 flex gap-3 border-t border-gray-100 pt-7">
                 <button
                   onClick={handleBack}
                   className="flex-1 px-5 py-3 rounded-full border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
@@ -873,11 +915,11 @@ export default function ProductDetail() {
                   onClick={handleAdd}
                   disabled={loading || outOfStock}
                   className={[
-                    "flex-1 flex items-center justify-center gap-[15px] px-[15px] py-[12px] rounded-full border-none transition-all duration-[400ms]",
+                    "flex-1 flex items-center justify-center gap-[12px] rounded-full px-5 py-3.5 transition-all duration-300",
                     outOfStock
-                      ? "bg-gray-300 outline outline-3 outline-gray-300 outline-offset-[-3px] cursor-not-allowed"
-                      : "bg-[#181717] outline outline-3 outline-[#181717] outline-offset-[-3px] cursor-pointer",
-                    !outOfStock && !loading ? "hover:bg-transparent" : "",
+                      ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-950 text-white cursor-pointer hover:bg-gray-800",
+                    !outOfStock && !loading ? "shadow-sm" : "",
                     loading ? "opacity-60" : "",
                   ].join(" ")}
                 >
@@ -896,7 +938,7 @@ export default function ProductDetail() {
 
                   <span
                     className={[
-                      "font-bold text-[0.95em] transition-colors duration-[400ms]",
+                      "text-sm font-semibold transition-colors duration-300",
                       outOfStock ? "text-[#666666]" : "text-white",
                     ].join(" ")}
                   >
@@ -942,14 +984,42 @@ export default function ProductDetail() {
   );
 }
 
-function Badge({ text, danger = false }: { text: string; danger?: boolean }) {
+function Badge({
+  text,
+  danger = false,
+  tone,
+}: {
+  text: string;
+  danger?: boolean;
+  tone?: FeatureTone;
+}) {
+  if (danger) {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700">
+        <span className="h-2 w-2 rounded-full bg-red-500" />
+        {text}
+      </span>
+    );
+  }
+
+  if (tone) {
+    const styles = FEATURE_BADGE_STYLES[tone];
+
+    return (
+      <span
+        className={[
+          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
+          styles.chip,
+        ].join(" ")}
+      >
+        <span className={["h-2 w-2 rounded-full", styles.dot].join(" ")} />
+        {text}
+      </span>
+    );
+  }
+
   return (
-    <span
-      className={[
-        "px-3 py-1 rounded-full text-xs font-semibold",
-        danger ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-700",
-      ].join(" ")}
-    >
+    <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700">
       {text}
     </span>
   );

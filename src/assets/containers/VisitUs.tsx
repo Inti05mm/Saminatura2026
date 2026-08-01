@@ -3,11 +3,11 @@ import { Link } from "react-router-dom";
 
 export default function VisitUs() {
   return (
-    <section className="bg-[#f5f5f0] py-8 md:py-10 overflow-hidden">
-      <div className="max-w-7xl mx-auto px-4">
+    <section className="bg-[#fbfaf6] py-8 md:py-10 overflow-hidden">
+      <div className="max-w-7xl mx-auto px-4 bg-[#fbfaf6]">
         <div className="relative rounded-[32px] overflow-hidden min-h-[340px] md:min-h-[380px] shadow-[0_20px_70px_rgba(0,0,0,0.08)] border border-white/30">
           
-          {/* Fondo general */}
+          {/* Fondo general verde del card, NO tocar */}
           <div className="absolute inset-0 bg-gradient-to-br from-[#6f8a63] via-[#7f9a72] to-[#a6b89b]" />
 
           {/* Manchas/blur decorativas */}
@@ -15,10 +15,8 @@ export default function VisitUs() {
           <div className="absolute bottom-0 right-0 w-64 h-64 bg-[#5d7a53]/30 rounded-full blur-3xl" />
           <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-52 h-52 bg-[#dfe8d8]/10 rounded-full blur-3xl" />
 
-          {/* División visual */}
           <div className="relative grid grid-cols-1 md:grid-cols-2 min-h-[340px] md:min-h-[380px]">
             
-            {/* LADO IZQUIERDO */}
             <div className="relative z-10 flex items-center">
               <div className="absolute inset-0 bg-black/16 backdrop-blur-[8px]" />
 
@@ -57,7 +55,6 @@ export default function VisitUs() {
               </div>
             </div>
 
-            {/* LADO DERECHO */}
             <div className="relative z-10 flex items-center justify-center p-6 md:p-8">
               <div className="absolute inset-0 bg-gradient-to-l from-[#dfe8d8]/12 to-transparent" />
 
@@ -77,12 +74,9 @@ export default function VisitUs() {
             </div>
           </div>
 
-          {/* línea/borde interior sutil */}
           <div className="pointer-events-none absolute inset-3 rounded-[26px] border border-white/10" />
         </div>
       </div>
     </section>
   );
 }
-
-

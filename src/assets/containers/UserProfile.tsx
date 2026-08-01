@@ -1,863 +1,849 @@
-import React, { useEffect, useRef, useState } from "react";
-import { supabase } from "../supabaseClient";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import UserPedidosPanel from "./UserPedidosPanel";
+import { supabase } from "../supabaseClient";
+import jsPDF from "jspdf";
+import logoUrl from "../pictures/logo_2.png";
 
-type ProfileRow = {
+type OrderItemRow = {
   id: string;
-  address: string | null;
-
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-
-  country: string | null;
-  company: string | null;
-
-  address_line1: string | null; // SOLO calle
-  address_line2: string | null; // Nº si viene (y piso/puerta si el user añade)
-
-  postal_code: string | null;
-  city: string | null;
-  region: string | null;
-
-  marketing_opt_in: boolean;
-
-  is_admin: boolean;
-  created_at?: string | null;
-  updated_at?: string | null;
+  product_id: number;
+  product_name: string;
+  unit_price: number;
+  quantity: number;
 };
+
+type InvoiceRow = {
+  id?: string;
+  invoice_code: string;
+  invoice_date: string;
+  pdf_url: string;
+};
+
+type OrderRow = {
+  id: string;
+  user_id: string;
+  status: "pending" | "paid" | "cancelled";
+  total_amount: number;
+  currency: string;
+  created_at: string | null;
+  updated_at: string | null;
+  paid_at: string | null;
+
+  customer_email: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+
+  shipping_method: string | null;
+  shipping_amount: number;
+
+  shipping_address: any | null;
+
+  order_items?: OrderItemRow[];
+  invoices?: InvoiceRow[] | null;
+};
+
+const COMPANY = {
+  name: "SAMINATURA",
+  subtitle: "Tienda ecológica, nutrición y bienestar",
+  email: "info@saminatura.com",
+  phone: "631 415 075",
+  address: "Calle Teruel 16, Binéfar, Huesca, España",
+  website: "www.saminatura.com",
+};
+
+const BRAND_COLOR = {
+  dark: [47, 65, 45] as [number, number, number],
+  green: [112, 171, 55] as [number, number, number],
+  soft: [245, 248, 242] as [number, number, number],
+  border: [220, 226, 215] as [number, number, number],
+  text: [35, 35, 35] as [number, number, number],
+  muted: [105, 105, 105] as [number, number, number],
+};
+
+const formatEUR = (n: number) =>
+  new Intl.NumberFormat("es-ES", {
+    style: "currency",
+    currency: "EUR",
+  }).format(Number.isFinite(n) ? n : 0);
 
 function formatDate(dt?: string | null) {
   if (!dt) return "—";
+
   const d = new Date(dt);
+
   if (Number.isNaN(d.getTime())) return dt;
+
   return new Intl.DateTimeFormat("es-ES", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(d);
 }
 
-async function ensureGoogleMapsPlacesLoaded() {
-  const w = window as any;
-  if (w.google?.maps?.places) return true;
+function buildShippingText(addr: any) {
+  if (!addr) return "—";
 
-  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
-  if (!key) return false;
+  const parts = [
+    [addr.first_name, addr.last_name].filter(Boolean).join(" ").trim(),
+    addr.company,
+    addr.line1,
+    addr.line2,
+    [addr.postal_code, addr.city].filter(Boolean).join(" ").trim(),
+    addr.region,
+    addr.country,
+  ].filter(Boolean);
 
-  const existing = document.querySelector(
-    'script[data-google-maps="1"]'
-  ) as HTMLScriptElement | null;
+  return parts.join(", ");
+}
 
-  if (existing) {
-    return await new Promise<boolean>((resolve) => {
-      const started = Date.now();
-      const t = setInterval(() => {
-        const ww = window as any;
-        if (ww.google?.maps?.places) {
-          clearInterval(t);
-          resolve(true);
-        } else if (Date.now() - started > 8000) {
-          clearInterval(t);
-          resolve(false);
-        }
-      }, 150);
+function statusLabel(status: OrderRow["status"]) {
+  if (status === "paid") return "Pagado";
+  if (status === "pending") return "Pendiente";
+  return "Cancelado";
+}
+
+async function imageToDataUrl(src: string): Promise<string | null> {
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("No se pudo cargar el logo"));
+      img.src = src;
     });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.drawImage(img, 0, 0);
+
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
   }
-
-  await new Promise<void>((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
-      key
-    )}&libraries=places&language=es&region=ES`;
-    s.async = true;
-    s.defer = true;
-    s.setAttribute("data-google-maps", "1");
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("No se pudo cargar Google Maps JS"));
-    document.head.appendChild(s);
-  });
-
-  return await new Promise<boolean>((resolve) => {
-    const started = Date.now();
-    const t = setInterval(() => {
-      const ww = window as any;
-      if (ww.google?.maps?.places) {
-        clearInterval(t);
-        resolve(true);
-      } else if (Date.now() - started > 8000) {
-        clearInterval(t);
-        resolve(false);
-      }
-    }, 150);
-  });
 }
 
-function splitStreetAndNumberFromLine1(line1: string | null | undefined) {
-  const s = String(line1 ?? "").trim();
-  if (!s) return { street: "", number: "" };
-
-  const beforeComma = s.split(",")[0]?.trim() ?? s;
-
-  const m = beforeComma.match(/^(.*?)(?:\s+(\d[\wºª\-\/]*))\s*$/);
-  if (!m) return { street: beforeComma, number: "" };
-
-  const street = (m[1] ?? "").trim();
-  const number = (m[2] ?? "").trim();
-  if (!street) return { street: beforeComma, number: "" };
-
-  return { street, number };
+function safeNumber(value: any) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
-type Tab = "profile" | "privacy" | "orders";
+function getSubtotal(order: OrderRow) {
+  return (order.order_items ?? []).reduce((acc, item) => {
+    return acc + safeNumber(item.unit_price) * safeNumber(item.quantity);
+  }, 0);
+}
 
-const UserProfile = () => {
+export default function UserPedidos() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("profile");
-
-  const [authEmail, setAuthEmail] = useState<string>("");
-  const [profile, setProfile] = useState<ProfileRow | null>(null);
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  // ✅ Dirección (uncontrolled)
-  const streetRef = useRef<HTMLInputElement | null>(null);
-  const hydratedOnceRef = useRef(false);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
 
-  // ✅ flags + refs para NO perder el listener
-  const addr2AutoFilledRef = useRef(false);
-  const acRef = useRef<any>(null);
-  const listenerRef = useRef<any>(null);
+  const openOrder = useMemo(
+    () => orders.find((order) => order.id === openId) ?? null,
+    [orders, openId]
+  );
 
-  // ✅ para controlar si el .pac-container está colapsado
-  const pacHiddenRef = useRef(false);
+  const load = async () => {
+    setLoading(true);
+    setErr(null);
 
-  const setStreetValue = (val: string) => {
-    if (streetRef.current) streetRef.current.value = val;
-  };
+    const { data: auth, error: authError } = await supabase.auth.getUser();
 
-  // ✅ util: colapsar / restaurar el dropdown (sin “quitar attribution”, solo ocultarlo cuando no toca)
-  const hidePac = () => {
-    pacHiddenRef.current = true;
-    document.querySelectorAll<HTMLElement>(".pac-container").forEach((el) => {
-      el.style.display = "none";
-      el.style.height = "0";
-      el.style.overflow = "hidden";
-      el.style.boxShadow = "none";
-      el.style.border = "0";
-      el.style.pointerEvents = "none";
-    });
-  };
-
-  const showPac = () => {
-    pacHiddenRef.current = false;
-    document.querySelectorAll<HTMLElement>(".pac-container").forEach((el) => {
-      el.style.display = "";
-      el.style.height = "";
-      el.style.overflow = "";
-      el.style.boxShadow = "";
-      el.style.border = "";
-      el.style.pointerEvents = "";
-    });
-  };
-
-  // =========================
-  // PRIVACIDAD: email + pass
-  // =========================
-  const [newEmail, setNewEmail] = useState("");
-  const [privacySaving, setPrivacySaving] = useState(false);
-  const [privacyMsg, setPrivacyMsg] = useState<string | null>(null);
-
-  const [newPassword, setNewPassword] = useState("");
-  const [newPassword2, setNewPassword2] = useState("");
-
-  const refreshAuthEmail = async () => {
-    const { data, error } = await supabase.auth.getUser();
-    if (!error) setAuthEmail(data.user?.email ?? "");
-  };
-
-  const requestEmailChange = async () => {
-    const email = newEmail.trim().toLowerCase();
-    if (!email) {
-      setPrivacyMsg("Escribe un email válido.");
+    if (authError || !auth?.user) {
+      navigate("/login");
       return;
     }
 
-    setPrivacySaving(true);
-    setPrivacyMsg(null);
-
-    // 🔐 Supabase manda un email al nuevo correo para confirmar el cambio.
-    // Necesitas tener bien configurado en Supabase: Auth > URL Configuration (Site URL + Redirect URLs).
-    const { error } = await supabase.auth.updateUser(
-      { email },
-      {
-        emailRedirectTo: `${window.location.origin}/perfil`,
-      } as any
-    );
-
-    if (error) {
-      setPrivacyMsg(`Error cambiando email ❌: ${error.message}`);
-      setPrivacySaving(false);
-      return;
-    }
-
-    setPrivacyMsg(
-      "Te he enviado un email al nuevo correo para confirmar el cambio. Hasta que no lo confirmes, no se actualiza."
-    );
-    setPrivacySaving(false);
-  };
-
-  const changePassword = async () => {
-    if (!newPassword || newPassword.length < 8) {
-      setPrivacyMsg("La contraseña debe tener al menos 8 caracteres.");
-      return;
-    }
-    if (newPassword !== newPassword2) {
-      setPrivacyMsg("Las contraseñas no coinciden.");
-      return;
-    }
-
-    setPrivacySaving(true);
-    setPrivacyMsg(null);
-
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-
-    if (error) {
-      setPrivacyMsg(`Error cambiando contraseña: ${error.message}`);
-      setPrivacySaving(false);
-      return;
-    }
-
-    setNewPassword("");
-    setNewPassword2("");
-    setPrivacyMsg("Contraseña actualizada ✅");
-    setPrivacySaving(false);
-  };
-
-  // =========================
-  // LOAD PERFIL
-  // =========================
-  useEffect(() => {
-    let alive = true;
-
-    const load = async () => {
-      setLoading(true);
-      setMessage(null);
-
-      const {
-        data: { user },
-        error: uErr,
-      } = await supabase.auth.getUser();
-
-      if (!alive) return;
-
-      if (uErr || !user) {
-        navigate("/login");
-        return;
-Toggle}
-
-      setAuthEmail(user.email ?? "");
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(
-          `
-          id, address, is_admin, created_at, updated_at,
-          first_name, last_name, phone,
-          country, company, address_line1, address_line2, postal_code, city, region,
-          marketing_opt_in
+    const { data, error } = await supabase
+      .from("orders")
+      .select(
         `
+        id,user_id,status,total_amount,currency,created_at,updated_at,paid_at,
+        customer_email,customer_name,customer_phone,
+        shipping_method,shipping_amount,shipping_address,
+        order_items (
+          id,
+          product_id,
+          product_name,
+          unit_price,
+          quantity,
+          created_at
+        ),
+        invoices!invoices_order_id_fkey (
+          invoice_code,
+          invoice_date,
+          pdf_url
         )
-        .eq("id", user.id)
-        .single();
+      `
+      )
+      .eq("user_id", auth.user.id)
+      .order("created_at", { ascending: false });
 
-      if (!alive) return;
-
-      if (error) {
-        const empty: ProfileRow = {
-          id: user.id,
-          address: null,
-          first_name: null,
-          last_name: null,
-          phone: null,
-          country: "España",
-          company: null,
-          address_line1: null,
-          address_line2: null,
-          postal_code: null,
-          city: null,
-          region: null,
-          marketing_opt_in: false,
-          is_admin: false,
-          created_at: null,
-          updated_at: null,
-        };
-        setProfile(empty);
-        setMessage("Completa tu perfil y guarda los cambios.");
-      } else {
-        const row = data as ProfileRow;
-
-        const { street, number } = splitStreetAndNumberFromLine1(row.address_line1);
-
-        const addr2 =
-          (row.address_line2 ?? "").trim()
-            ? row.address_line2
-            : number
-            ? number
-            : row.address_line2;
-
-        addr2AutoFilledRef.current = !(row.address_line2 ?? "").trim() && !!number;
-
-        setProfile({
-          ...row,
-          country: row.country ?? "España",
-          address_line1: street || null,
-          address_line2: addr2 ?? null,
-        });
-      }
-
+    if (error) {
+      setErr(error.message);
+      setOrders([]);
       setLoading(false);
-    };
+      return;
+    }
 
+    const rows = (data ?? []) as OrderRow[];
+
+    setOrders(rows);
+
+    if (!openId && rows.length > 0) {
+      setOpenId(rows[0].id);
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // refresca email si llega cambio por confirmación
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      refreshAuthEmail().catch(() => {});
-    });
+  const downloadOrderPdf = async (order: OrderRow) => {
+    setPdfLoadingId(order.id);
 
-    return () => {
-      alive = false;
-      sub?.subscription?.unsubscribe();
-    };
-  }, [navigate]);
+    try {
+      const doc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
 
-  // ✅ hidratar SOLO 1 vez input Dirección
-  useEffect(() => {
-    if (!profile) return;
-    if (hydratedOnceRef.current) return;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
 
-    hydratedOnceRef.current = true;
-    setStreetValue(profile.address_line1 ?? "");
-  }, [profile]);
+      const marginX = 16;
+      const rightX = pageWidth - marginX;
+      let y = 16;
 
-  // ✅ Autocomplete
-  useEffect(() => {
-    if (tab !== "profile") return;
-    if (!profile) return;
+      const logoDataUrl = await imageToDataUrl(logoUrl);
 
-    let cancelled = false;
+      const drawFooter = () => {
+        const footerY = pageHeight - 14;
 
-    const getComp = (comps: any[], type: string) =>
-      comps.find((c: any) => (c.types || []).includes(type))?.long_name || "";
+        doc.setDrawColor(...BRAND_COLOR.border);
+        doc.line(marginX, footerY - 6, rightX, footerY - 6);
 
-    // ✅ Forzar SOLO calle (SIN disparar "input" para no reabrir el dropdown)
-    const forceStreetOnly = (street: string) => {
-      const input = streetRef.current;
-      if (!input) return;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(...BRAND_COLOR.muted);
 
-      const apply = () => {
-        input.value = street;
+        doc.text(
+          "Gracias por confiar en SAMINATURA. Este documento es un resumen/recibo del pedido.",
+          marginX,
+          footerY
+        );
+
+        doc.text(`Página ${doc.getNumberOfPages()}`, rightX, footerY, {
+          align: "right",
+        });
       };
 
-      queueMicrotask(apply);
-      requestAnimationFrame(apply);
-      setTimeout(apply, 60);
-      setTimeout(apply, 180);
-    };
-
-    // ✅ Cerrar dropdown de Google (colapsar pac-container)
-    const closePac = () => {
-      const input = streetRef.current;
-      if (!input) return;
-
-      input.blur();
-
-      const esc = new KeyboardEvent("keydown", {
-        key: "Escape",
-        code: "Escape",
-        keyCode: 27,
-        which: 27,
-        bubbles: true,
-      });
-      input.dispatchEvent(esc);
-
-      setTimeout(() => hidePac(), 0);
-    };
-
-    const setup = async () => {
-      const ok = await ensureGoogleMapsPlacesLoaded();
-      if (!ok || cancelled) return;
-
-      const w = window as any;
-      const input = streetRef.current;
-      if (!w.google?.maps?.places || !input) return;
-
-      if (acRef.current && listenerRef.current) return;
-
-      const ac = new w.google.maps.places.Autocomplete(input, {
-        types: ["address"],
-        componentRestrictions: { country: ["es"] },
-        fields: ["address_components", "name", "formatted_address"],
-      });
-
-      const onPlaceChanged = () => {
-        const place = ac.getPlace();
-        const comps = place?.address_components ?? [];
-
-        const streetNumber = getComp(comps, "street_number");
-        const route = getComp(comps, "route");
-
-        const postalCode = getComp(comps, "postal_code");
-
-        const city =
-          getComp(comps, "locality") ||
-          getComp(comps, "postal_town") ||
-          getComp(comps, "administrative_area_level_3") ||
-          getComp(comps, "sublocality") ||
-          getComp(comps, "sublocality_level_1");
-
-        const region =
-          getComp(comps, "administrative_area_level_2") ||
-          getComp(comps, "administrative_area_level_1");
-
-        const country = getComp(comps, "country") || "España";
-
-        const street = (route || "").trim();
-
-        if (street) {
-          forceStreetOnly(street);
-        } else {
-          const current = (streetRef.current?.value ?? "").trim();
-          const cleaned = current.split(",")[0]?.trim();
-          if (cleaned) forceStreetOnly(cleaned);
+      const checkPageBreak = (neededSpace = 20) => {
+        if (y + neededSpace > pageHeight - 25) {
+          drawFooter();
+          doc.addPage();
+          y = 18;
         }
+      };
 
-        setProfile((p) => {
-          if (!p) return p;
+      const sectionTitle = (title: string) => {
+        checkPageBreak(14);
 
-          const addr2Current = (p.address_line2 ?? "").trim();
-          const canOverwriteAddr2 = !addr2Current || addr2AutoFilledRef.current;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(...BRAND_COLOR.dark);
+        doc.text(title, marginX, y);
 
-          let nextAddr2 = p.address_line2;
-          if (streetNumber && canOverwriteAddr2) {
-            nextAddr2 = streetNumber;
-            addr2AutoFilledRef.current = true;
+        y += 3;
+
+        doc.setDrawColor(...BRAND_COLOR.green);
+        doc.setLineWidth(0.5);
+        doc.line(marginX, y, marginX + 32, y);
+
+        y += 8;
+      };
+
+      // HEADER
+      if (logoDataUrl) {
+        doc.addImage(logoDataUrl, "PNG", marginX, 12, 62, 24);
+      } else {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(22);
+        doc.setTextColor(...BRAND_COLOR.dark);
+        doc.text(COMPANY.name, marginX, 24);
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(...BRAND_COLOR.dark);
+      doc.text("Resumen de pedido", rightX, 20, { align: "right" });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...BRAND_COLOR.muted);
+      doc.text(`Pedido: ${order.id}`, rightX, 27, { align: "right" });
+      doc.text(`Fecha: ${formatDate(order.created_at)}`, rightX, 32, {
+        align: "right",
+      });
+
+      y = 44;
+
+      // BLOQUE SUPERIOR
+      const topBoxY = y;
+      const topBoxH = 40;
+      const topBoxW = pageWidth - marginX * 2;
+
+      doc.setFillColor(...BRAND_COLOR.soft);
+      doc.setDrawColor(...BRAND_COLOR.border);
+      doc.roundedRect(marginX, topBoxY, topBoxW, topBoxH, 3, 3, "FD");
+
+      const leftX = marginX + 5;
+      const rightColX = rightX - 42;
+      const leftMaxWidth = 112;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...BRAND_COLOR.dark);
+      doc.text(COMPANY.name, leftX, topBoxY + 8);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...BRAND_COLOR.muted);
+
+      let companyInfoY = topBoxY + 14;
+
+      const companyInfoLines = [
+        COMPANY.subtitle,
+        COMPANY.address,
+        `Tel. ${COMPANY.phone}`,
+      ];
+
+      companyInfoLines.forEach((line) => {
+        const lines = doc.splitTextToSize(line, leftMaxWidth);
+        doc.text(lines, leftX, companyInfoY);
+        companyInfoY += lines.length * 4.2;
+      });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...BRAND_COLOR.dark);
+      doc.text("Estado", rightColX, topBoxY + 8);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...BRAND_COLOR.text);
+      doc.text(statusLabel(order.status), rightColX, topBoxY + 14);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...BRAND_COLOR.dark);
+      doc.text("Pago", rightColX, topBoxY + 23);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...BRAND_COLOR.text);
+      doc.text(
+        order.paid_at ? formatDate(order.paid_at) : "—",
+        rightColX,
+        topBoxY + 29
+      );
+
+      y += topBoxH + 12;
+
+      // CLIENTE Y ENVÍO
+      const boxGap = 8;
+      const boxWidth = (pageWidth - marginX * 2 - boxGap) / 2;
+      const boxY = y;
+      const boxH = 58;
+
+      doc.setDrawColor(...BRAND_COLOR.border);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(marginX, boxY, boxWidth, boxH, 3, 3, "S");
+      doc.roundedRect(
+        marginX + boxWidth + boxGap,
+        boxY,
+        boxWidth,
+        boxH,
+        3,
+        3,
+        "S"
+      );
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(...BRAND_COLOR.dark);
+      doc.text("Cliente", marginX + 5, boxY + 8);
+      doc.text("Envío", marginX + boxWidth + boxGap + 5, boxY + 8);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...BRAND_COLOR.text);
+
+      const clientLines = [
+        order.customer_name ?? "—",
+        order.customer_email ?? "—",
+        order.customer_phone ? `Tel. ${order.customer_phone}` : "Tel. —",
+      ];
+
+      let clientY = boxY + 17;
+
+      clientLines.forEach((line) => {
+        const lines = doc.splitTextToSize(line, boxWidth - 10);
+        doc.text(lines, marginX + 5, clientY);
+        clientY += lines.length * 4.5;
+      });
+
+      const shippingAddress = buildShippingText(order.shipping_address);
+
+      const shippingLines = [
+        `Método: ${order.shipping_method ?? "—"}`,
+        `Coste: ${formatEUR(safeNumber(order.shipping_amount))}`,
+        shippingAddress,
+      ];
+
+      let shipY = boxY + 17;
+
+      shippingLines.forEach((line) => {
+        const lines = doc.splitTextToSize(line, boxWidth - 10);
+        doc.text(lines, marginX + boxWidth + boxGap + 5, shipY);
+        shipY += lines.length * 4.5;
+      });
+
+      y = boxY + boxH + 14;
+
+      // ARTÍCULOS
+      sectionTitle("Artículos del pedido");
+
+      const tableX = marginX;
+      const tableW = pageWidth - marginX * 2;
+      const colProduct = tableX + 4;
+      const colQty = tableX + tableW - 64;
+      const colUnit = tableX + tableW - 43;
+      const colTotal = tableX + tableW - 8;
+
+      const drawTableHeader = () => {
+        doc.setFillColor(...BRAND_COLOR.dark);
+        doc.rect(tableX, y, tableW, 9, "F");
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(255, 255, 255);
+
+        doc.text("Producto", colProduct, y + 6);
+        doc.text("Cant.", colQty, y + 6, { align: "right" });
+        doc.text("Precio", colUnit, y + 6, { align: "right" });
+        doc.text("Total", colTotal, y + 6, { align: "right" });
+
+        y += 9;
+      };
+
+      drawTableHeader();
+
+      const items = order.order_items ?? [];
+
+      if (items.length === 0) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...BRAND_COLOR.muted);
+        doc.text(
+          "No hay artículos registrados en este pedido.",
+          colProduct,
+          y + 8
+        );
+        y += 16;
+      } else {
+        items.forEach((item, index) => {
+          const quantity = safeNumber(item.quantity);
+          const unitPrice = safeNumber(item.unit_price);
+          const lineTotal = unitPrice * quantity;
+
+          const productLines = doc.splitTextToSize(
+            item.product_name || "Producto sin nombre",
+            tableW - 74
+          );
+
+          const rowH = Math.max(10, productLines.length * 4.5 + 6);
+
+          checkPageBreak(rowH + 12);
+
+          if (y < 25) {
+            drawTableHeader();
           }
 
-          return {
-            ...p,
-            address_line1: street || p.address_line1,
-            address_line2: nextAddr2,
-            postal_code: postalCode || null,
-            city: city || null,
-            region: region || null,
-            country: country || p.country || "España",
-          };
+          if (index % 2 === 0) {
+            doc.setFillColor(250, 250, 250);
+            doc.rect(tableX, y, tableW, rowH, "F");
+          }
+
+          doc.setDrawColor(235, 235, 235);
+          doc.line(tableX, y + rowH, tableX + tableW, y + rowH);
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.8);
+          doc.setTextColor(...BRAND_COLOR.text);
+          doc.text(productLines, colProduct, y + 6);
+
+          doc.text(String(quantity), colQty, y + 6, { align: "right" });
+          doc.text(formatEUR(unitPrice), colUnit, y + 6, { align: "right" });
+
+          doc.setFont("helvetica", "bold");
+          doc.text(formatEUR(lineTotal), colTotal, y + 6, {
+            align: "right",
+          });
+
+          y += rowH;
         });
-
-        closePac();
-      };
-
-      const listener = ac.addListener("place_changed", onPlaceChanged);
-
-      acRef.current = ac;
-      listenerRef.current = listener;
-    };
-
-    setup();
-
-    return () => {
-      cancelled = true;
-      if (tab !== "profile") {
-        if (listenerRef.current?.remove) listenerRef.current.remove();
-        listenerRef.current = null;
-        acRef.current = null;
       }
-    };
-  }, [tab, profile]);
 
-  const saveProfile = async () => {
-    if (!profile) return;
+      y += 8;
 
-    setSaving(true);
-    setMessage(null);
+      // TOTALES
+      checkPageBreak(42);
 
-    const streetDomRaw = (streetRef.current?.value ?? "").trim();
-    const streetDom = (streetDomRaw.split(",")[0] ?? "").trim();
+      const subtotal = getSubtotal(order);
+      const shipping = safeNumber(order.shipping_amount);
+      const total = safeNumber(order.total_amount);
 
-    const payload = {
-      id: profile.id,
+      const totalBoxW = 72;
+      const totalBoxX = rightX - totalBoxW;
 
-      first_name: profile.first_name?.trim() || null,
-      last_name: profile.last_name?.trim() || null,
-      phone: profile.phone?.trim() || null,
+      doc.setDrawColor(...BRAND_COLOR.border);
+      doc.setFillColor(...BRAND_COLOR.soft);
+      doc.roundedRect(totalBoxX, y, totalBoxW, 34, 3, 3, "FD");
 
-      country: profile.country?.trim() || "España",
-      company: profile.company?.trim() || null,
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...BRAND_COLOR.text);
 
-      address_line1: streetDom || null,
-      address_line2: profile.address_line2?.trim() || null,
+      doc.text("Subtotal", totalBoxX + 6, y + 8);
+      doc.text(formatEUR(subtotal), totalBoxX + totalBoxW - 6, y + 8, {
+        align: "right",
+      });
 
-      postal_code: profile.postal_code?.trim() || null,
-      city: profile.city?.trim() || null,
-      region: profile.region?.trim() || null,
+      doc.text("Envío", totalBoxX + 6, y + 16);
+      doc.text(formatEUR(shipping), totalBoxX + totalBoxW - 6, y + 16, {
+        align: "right",
+      });
 
-      marketing_opt_in: !!profile.marketing_opt_in,
-      updated_at: new Date().toISOString(),
-    };
+      doc.setDrawColor(...BRAND_COLOR.border);
+      doc.line(totalBoxX + 6, y + 21, totalBoxX + totalBoxW - 6, y + 21);
 
-    const { error } = await supabase.from("profiles").upsert([payload], { onConflict: "id" });
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(...BRAND_COLOR.dark);
+      doc.text("Total", totalBoxX + 6, y + 29);
+      doc.text(formatEUR(total), totalBoxX + totalBoxW - 6, y + 29, {
+        align: "right",
+      });
 
-    if (error) {
-      console.error(error);
-      setMessage(`Error guardando cambios ❌: ${error.message}`);
-      setSaving(false);
-      return;
+      y += 48;
+
+      // NOTA LEGAL
+      checkPageBreak(25);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(...BRAND_COLOR.muted);
+
+      const note =
+        "Este documento es un resumen del pedido realizado en SAMINATURA. No sustituye una factura legal si esta debe emitirse con numeración fiscal, NIF/CIF, desglose de impuestos y datos fiscales completos.";
+
+      const noteLines = doc.splitTextToSize(note, pageWidth - marginX * 2);
+      doc.text(noteLines, marginX, y);
+
+      drawFooter();
+
+      doc.save(`pedido-saminatura-${order.id}.pdf`);
+    } finally {
+      setPdfLoadingId(null);
     }
-
-    setMessage("Perfil actualizado ✅");
-    setSaving(false);
   };
 
-  const signOut = async () => {
-    await supabase.auth.signOut().catch(() => {});
-    navigate("/login");
-  };
+  if (loading) {
+    return <div className="p-8 text-gray-600">Cargando pedidos…</div>;
+  }
 
-  if (loading) return <div className="p-8 text-gray-600">Cargando perfil…</div>;
-  if (!profile) return <div className="p-8 text-red-600">Perfil no encontrado</div>;
+  if (err) {
+    return <div className="p-8 text-red-600">Error: {err}</div>;
+  }
 
   return (
-    <main className="bg-gray-100 min-h-screen py-10">
+    <main className="min-h-screen bg-gray-100 py-10">
       <div className="mx-auto max-w-6xl px-4">
-        <div className="overflow-hidden rounded-lg bg-white shadow">
-          <div className="lg:grid lg:grid-cols-12 lg:divide-x">
-            <aside className="lg:col-span-3 p-6 border-b lg:border-b-0">
-              <div className="mb-5">
-                <div className="text-sm text-gray-500">Cuenta</div>
-                <div className="font-semibold text-gray-900 break-words">{authEmail || "—"}</div>
+        <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-200">
+          <div className="border-b bg-white p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  Mis pedidos
+                </h1>
 
-                {profile.is_admin && (
-                  <div className="inline-flex mt-3 px-2 py-1 rounded-full bg-purple-100 text-purple-700 text-xs font-semibold">
-                    Admin
-                  </div>
-                )}
-
-                <div className="mt-3 text-xs text-gray-500">
-                  <div>Creado: {formatDate(profile.created_at)}</div>
-                  <div>Actualizado: {formatDate(profile.updated_at)}</div>
-                </div>
+                <p className="mt-1 text-sm text-gray-500">
+                  Consulta tu historial, revisa los detalles y descarga el
+                  resumen de cada pedido.
+                </p>
               </div>
 
-              <nav className="space-y-2">
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setTab("profile")}
-                  className={`w-full text-left px-3 py-2 rounded-md font-medium ${
-                    tab === "profile" ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50"
-                  }`}
+                  onClick={() => navigate("/profile")}
+                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                 >
-                  Perfil
+                  Volver al perfil
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setPrivacyMsg(null);
-                    setTab("privacy");
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-md font-medium ${
-                    tab === "privacy" ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50"
-                  }`}
+                  onClick={load}
+                  className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-900"
                 >
-                  Privacidad
+                  Recargar
                 </button>
+              </div>
+            </div>
+          </div>
 
-                <button
-                  type="button"
-                  onClick={() => setTab("orders")}
-                  className={`w-full text-left px-3 py-2 rounded-md ${
-                    tab === "orders" ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  Mis pedidos
-                </button>
-
-                
-              </nav>
-            </aside>
-
-            <section className="lg:col-span-9 p-6">
-              {tab === "orders" ? (
-                <UserPedidosPanel />
-              ) : tab === "privacy" ? (
-                <>
-                  <h2 className="text-xl font-bold text-gray-900">Privacidad</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Gestiona tu email y contraseña. Para cambiar el email, Supabase envía un correo de confirmación al nuevo email.
-                  </p>
-
-                  <div className="mt-6 space-y-6">
-                    {/* EMAIL */}
-                    <div className="rounded-lg border border-gray-200 p-5">
-                      <div className="font-semibold text-gray-900">Correo electrónico</div>
-                      <div className="text-sm text-gray-500 mt-1">
-                        Actual: <span className="font-medium text-gray-800">{authEmail || "—"}</span>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700">Nuevo correo</label>
-                          <input
-                            value={newEmail}
-                            onChange={(e) => setNewEmail(e.target.value)}
-                            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                            placeholder="nuevo@email.com"
-                            autoComplete="email"
-                          />
-                        </div>
-
-                        <button
-                          onClick={requestEmailChange}
-                          disabled={privacySaving}
-                          className="h-[42px] rounded-md bg-black text-white hover:bg-gray-900 disabled:opacity-50 px-4"
-                        >
-                          {privacySaving ? "Enviando…" : "Enviar verificación"}
-                        </button>
-                      </div>
-
-                      <p className="mt-3 text-xs text-gray-500">
-                        * El cambio NO se aplica hasta que confirmes desde el email recibido en la nueva dirección.
-                      </p>
-                    </div>
-
-                    {/* PASSWORD */}
-                    <div className="rounded-lg border border-gray-200 p-5">
-                      <div className="font-semibold text-gray-900">Contraseña</div>
-                      <div className="text-sm text-gray-500 mt-1">Cambia tu contraseña desde aquí.</div>
-
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">Nueva contraseña</label>
-                          <input
-                            type="password"
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                            placeholder="Mínimo 8 caracteres"
-                            autoComplete="new-password"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">Repite la contraseña</label>
-                          <input
-                            type="password"
-                            value={newPassword2}
-                            onChange={(e) => setNewPassword2(e.target.value)}
-                            className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                            placeholder="Nueva contraseña"
-                            autoComplete="new-password"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex justify-end">
-                        <button
-                          onClick={changePassword}
-                          disabled={privacySaving}
-                          className="rounded-md bg-black text-white hover:bg-gray-900 disabled:opacity-50 px-5 py-2"
-                        >
-                          {privacySaving ? "Guardando…" : "Actualizar contraseña"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {privacyMsg && <p className="mt-4 text-sm text-gray-700">{privacyMsg}</p>}
-                </>
+          <div className="lg:grid lg:grid-cols-12 lg:divide-x">
+            <section className="p-6 lg:col-span-5">
+              {orders.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-600">
+                  Aún no tienes pedidos.
+                </div>
               ) : (
-                <>
-                  <h2 className="text-xl font-bold text-gray-900">Mi perfil</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Estos datos se pueden usar automáticamente en el checkout.
-                  </p>
+                <div className="space-y-3">
+                  {orders.map((order) => (
+                    <button
+                      key={order.id}
+                      type="button"
+                      onClick={() => setOpenId(order.id)}
+                      className={`w-full rounded-xl border p-4 text-left transition hover:bg-gray-50 ${
+                        openId === order.id
+                          ? "border-black bg-gray-50"
+                          : "border-gray-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                            Pedido
+                          </div>
 
-                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="mt-1 break-all text-sm font-semibold text-gray-900">
+                            {order.id}
+                          </div>
+
+                          <div className="mt-2 text-sm text-gray-600">
+                            {formatDate(order.created_at)}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          <div className="text-sm font-bold text-gray-900">
+                            {formatEUR(safeNumber(order.total_amount))}
+                          </div>
+
+                          <div
+                            className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                              order.status === "paid"
+                                ? "bg-green-100 text-green-700"
+                                : order.status === "pending"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : "bg-red-100 text-red-700"
+                            }`}
+                          >
+                            {statusLabel(order.status)}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="p-6 lg:col-span-7">
+              {!openOrder ? (
+                <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-600">
+                  Selecciona un pedido para ver el detalle.
+                </div>
+              ) : (
+                <div>
+                  <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Nombre</label>
-                      <input
-                        value={profile.first_name ?? ""}
-                        onChange={(e) => setProfile({ ...profile, first_name: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Nombre"
-                      />
+                      <h2 className="text-xl font-bold text-gray-900">
+                        Detalle del pedido
+                      </h2>
+
+                      <div className="mt-1 break-all text-sm text-gray-500">
+                        {openOrder.id}
+                      </div>
+
+                      <div className="mt-3 grid gap-1 text-sm text-gray-700">
+                        <div>
+                          Estado:{" "}
+                          <span className="font-medium">
+                            {statusLabel(openOrder.status)}
+                          </span>
+                        </div>
+
+                        <div>
+                          Creado:{" "}
+                          <span className="font-medium">
+                            {formatDate(openOrder.created_at)}
+                          </span>
+                        </div>
+
+                        <div>
+                          Pagado:{" "}
+                          <span className="font-medium">
+                            {formatDate(openOrder.paid_at)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Apellidos</label>
-                      <input
-                        value={profile.last_name ?? ""}
-                        onChange={(e) => setProfile({ ...profile, last_name: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Apellidos"
-                      />
-                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {openOrder.invoices?.[0]?.pdf_url ? (
+                        <a
+                          href={openOrder.invoices[0].pdf_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                        >
+                          Ver factura PDF
+                        </a>
+                      ) : null}
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Teléfono</label>
-                      <input
-                        value={profile.phone ?? ""}
-                        onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="600 000 000"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">País / Región</label>
-                      <select
-                        value={profile.country ?? "España"}
-                        onChange={(e) => setProfile({ ...profile, country: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
+                      <button
+                        type="button"
+                        onClick={() => downloadOrderPdf(openOrder)}
+                        disabled={pdfLoadingId === openOrder.id}
+                        className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <option>España</option>
-                      </select>
+                        {pdfLoadingId === openOrder.id
+                          ? "Generando PDF…"
+                          : "Descargar resumen PDF"}
+                      </button>
                     </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700">Empresa (opcional)</label>
-                      <input
-                        value={profile.company ?? ""}
-                        onChange={(e) => setProfile({ ...profile, company: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Empresa"
-                      />
-                    </div>
-
-                    {/* ✅ Dirección */}
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700">Dirección</label>
-                      <input
-                        ref={streetRef}
-                        defaultValue={profile.address_line1 ?? ""}
-                        onFocus={() => {
-                          if (pacHiddenRef.current) showPac();
-                        }}
-                        onChange={(e) => {
-                          if (pacHiddenRef.current) showPac();
-
-                          const v = e.target.value;
-
-                          setProfile((p) => {
-                            if (!p) return p;
-
-                            const trimmed = v.trim();
-                            const shouldClear = trimmed.length === 0;
-
-                            const nextAddr2 =
-                              shouldClear && addr2AutoFilledRef.current ? "" : p.address_line2 ?? "";
-
-                            if (shouldClear) {
-                              addr2AutoFilledRef.current = false;
-                            }
-
-                            return {
-                              ...p,
-                              address_line1: v,
-                              address_line2: nextAddr2,
-                              postal_code: shouldClear ? "" : p.postal_code,
-                              city: shouldClear ? "" : p.city,
-                              region: shouldClear ? "" : p.region,
-                            };
-                          });
-                        }}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Calle"
-                        autoComplete="off"
-                      />
-                      <p className="mt-1 text-xs text-gray-500">
-                        Al elegir una sugerencia se rellena CP/ciudad/provincia; el desplegable se cierra solo.
-                      </p>
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Casa, apartamento, etc. (opcional)
-                      </label>
-                      <input
-                        value={profile.address_line2 ?? ""}
-                        onChange={(e) => {
-                          addr2AutoFilledRef.current = false;
-                          setProfile({ ...profile, address_line2: e.target.value });
-                        }}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Nº, piso, puerta, escalera..."
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Código postal</label>
-                      <input
-                        value={profile.postal_code ?? ""}
-                        onChange={(e) => setProfile({ ...profile, postal_code: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="00000"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Ciudad</label>
-                      <input
-                        value={profile.city ?? ""}
-                        onChange={(e) => setProfile({ ...profile, city: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Ciudad"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700">Provincia / Estado</label>
-                      <input
-                        value={profile.region ?? ""}
-                        onChange={(e) => setProfile({ ...profile, region: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
-                        placeholder="Provincia"
-                      />
-                    </div>
-
-                    <label className="md:col-span-2 flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={!!profile.marketing_opt_in}
-                        onChange={(e) => setProfile({ ...profile, marketing_opt_in: e.target.checked })}
-                      />
-                      <span className="text-gray-700">Enviarme novedades y ofertas por email</span>
-                    </label>
                   </div>
 
-                  {message && <p className="mt-4 text-sm text-gray-700">{message}</p>}
+                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="font-semibold text-gray-900">
+                        Cliente
+                      </div>
 
-                  <div className="mt-6 flex justify-end gap-3">
-                    <button
-                      onClick={() => navigate("/")}
-                      className="px-6 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
-                    >
-                      Volver
-                    </button>
+                      <div className="mt-2 space-y-1 text-sm text-gray-700">
+                        <div>{openOrder.customer_name ?? "—"}</div>
+                        <div>{openOrder.customer_email ?? "—"}</div>
+                        <div>{openOrder.customer_phone ?? "—"}</div>
+                      </div>
+                    </div>
 
-                    <button
-                      onClick={saveProfile}
-                      disabled={saving}
-                      className="px-6 py-2 rounded-md bg-black text-white hover:bg-gray-900 disabled:opacity-50"
-                    >
-                      {saving ? "Guardando…" : "Guardar cambios"}
-                    </button>
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="font-semibold text-gray-900">Envío</div>
+
+                      <div className="mt-2 space-y-1 text-sm text-gray-700">
+                        <div>
+                          Método: {openOrder.shipping_method ?? "—"}{" "}
+                          ({formatEUR(safeNumber(openOrder.shipping_amount))})
+                        </div>
+
+                        <div>
+                          Dirección:{" "}
+                          {buildShippingText(openOrder.shipping_address)}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </>
+
+                  <div className="mt-6">
+                    <div className="font-semibold text-gray-900">
+                      Artículos
+                    </div>
+
+                    <div className="mt-3 overflow-hidden rounded-xl border border-gray-200">
+                      {(openOrder.order_items ?? []).map((item) => {
+                        const lineTotal =
+                          safeNumber(item.unit_price) *
+                          safeNumber(item.quantity);
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-4 border-b border-gray-100 p-4 last:border-b-0"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium text-gray-900">
+                                {item.product_name}
+                              </div>
+
+                              <div className="mt-1 text-sm text-gray-500">
+                                {safeNumber(item.quantity)} x{" "}
+                                {formatEUR(safeNumber(item.unit_price))}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 font-semibold text-gray-900">
+                              {formatEUR(lineTotal)}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {(openOrder.order_items ?? []).length === 0 && (
+                        <div className="p-4 text-gray-600">—</div>
+                      )}
+                    </div>
+
+                    <div className="mt-5 flex justify-end">
+                      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4">
+                        <div className="flex justify-between text-sm text-gray-700">
+                          <span>Subtotal</span>
+                          <span>{formatEUR(getSubtotal(openOrder))}</span>
+                        </div>
+
+                        <div className="mt-2 flex justify-between text-sm text-gray-700">
+                          <span>Envío</span>
+                          <span>
+                            {formatEUR(safeNumber(openOrder.shipping_amount))}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 border-t pt-3">
+                          <div className="flex justify-between text-base font-bold text-gray-900">
+                            <span>Total</span>
+                            <span>
+                              {formatEUR(safeNumber(openOrder.total_amount))}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="mt-4 text-xs leading-relaxed text-gray-500">
+                      Nota: “Descargar resumen PDF” genera un recibo/resumen del
+                      pedido. Para una factura legal completa deberías usar la
+                      factura emitida en tu sistema de facturación y guardarla en{" "}
+                      <code>invoices.pdf_url</code>.
+                    </p>
+                  </div>
+                </div>
               )}
             </section>
           </div>
@@ -865,6 +851,4 @@ Toggle}
       </div>
     </main>
   );
-};
-
-export default UserProfile;
+}

@@ -11,7 +11,7 @@ type OrderRow = {
   customer_name: string | null;
   customer_phone: string | null;
 
-  shipping_address: any | null; // jsonb
+  shipping_address: any | null;
   shipping_method: string | null;
   shipping_amount: number | null;
 
@@ -20,6 +20,11 @@ type OrderRow = {
   total_amount: number | null;
   stripe_session_id: string | null;
   paid_at: string | null;
+
+  stock_reserved: boolean | null;
+  stock_released: boolean | null;
+  firesoft_processed_at: string | null;
+  cancelled_at: string | null;
 };
 
 type OrderItemRow = {
@@ -79,7 +84,22 @@ function formatAddressShort(a: any | null) {
   return parts.join(", ");
 }
 
-// ✅ como antes: chip azul Usuario / chip morado Invitado
+function getStatusLabel(status: string) {
+  if (status === "paid") return "Pagado";
+  if (status === "pending") return "Pendiente";
+  if (status === "fulfilled") return "Preparado / pasado por Firesoft";
+  if (status === "cancelled") return "Cancelado";
+  return status;
+}
+
+function getStatusClass(status: string) {
+  if (status === "paid") return "bg-green-100 text-green-800";
+  if (status === "pending") return "bg-yellow-100 text-yellow-800";
+  if (status === "fulfilled") return "bg-blue-100 text-blue-800";
+  if (status === "cancelled") return "bg-red-100 text-red-800";
+  return "bg-gray-100 text-gray-800";
+}
+
 function CustomerTag({ o }: { o: OrderRow }) {
   if (o.user_id) {
     return (
@@ -143,8 +163,8 @@ function Modal({
   return (
     <div className="fixed inset-0 z-50">
       <button className="absolute inset-0 bg-black/40" onClick={onClose} aria-label="Close modal" />
-      <div className="absolute left-1/2 top-1/2 w-[95vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-6 py-4">
+      <div className="absolute left-1/2 top-1/2 w-[95vw] max-w-5xl max-h-[92vh] overflow-auto -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-6 py-4">
           <h3 className="text-lg font-semibold text-[#191919]">{title}</h3>
           <button
             onClick={onClose}
@@ -168,9 +188,9 @@ export default function AdminOrdersManager() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ filtros por checkbox (default: ambos true)
   const [showPaid, setShowPaid] = useState(true);
   const [showPending, setShowPending] = useState(true);
+  const [showFulfilled, setShowFulfilled] = useState(true);
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -182,13 +202,17 @@ export default function AdminOrdersManager() {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsErr, setItemsErr] = useState<string | null>(null);
 
+  const [processingFiresoft, setProcessingFiresoft] = useState(false);
+  const [firesoftActionErr, setFiresoftActionErr] = useState<string | null>(null);
+  const [firesoftActionOk, setFiresoftActionOk] = useState<string | null>(null);
+
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
 
   useEffect(() => {
     if (!user) return;
     void loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, page, showPaid, showPending]);
+  }, [user, page, showPaid, showPending, showFulfilled]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -210,11 +234,31 @@ export default function AdminOrdersManager() {
       let statuses: string[] = [];
       if (showPaid) statuses.push("paid");
       if (showPending) statuses.push("pending");
+      if (showFulfilled) statuses.push("fulfilled");
 
       let q = supabase
         .from("orders")
         .select(
-          "id,user_id,guest_token,customer_email,customer_name,customer_phone,shipping_address,shipping_method,shipping_amount,status,currency,total_amount,stripe_session_id,paid_at",
+          [
+            "id",
+            "user_id",
+            "guest_token",
+            "customer_email",
+            "customer_name",
+            "customer_phone",
+            "shipping_address",
+            "shipping_method",
+            "shipping_amount",
+            "status",
+            "currency",
+            "total_amount",
+            "stripe_session_id",
+            "paid_at",
+            "stock_reserved",
+            "stock_released",
+            "firesoft_processed_at",
+            "cancelled_at",
+          ].join(","),
           { count: "exact" }
         )
         .order("paid_at", { ascending: false, nullsFirst: false })
@@ -248,6 +292,8 @@ export default function AdminOrdersManager() {
     setItems([]);
     setItemsErr(null);
     setItemsLoading(true);
+    setFiresoftActionErr(null);
+    setFiresoftActionOk(null);
 
     try {
       const { data, error } = await supabase
@@ -288,11 +334,89 @@ export default function AdminOrdersManager() {
     setSelectedOrder(null);
     setItems([]);
     setItemsErr(null);
+    setFiresoftActionErr(null);
+    setFiresoftActionOk(null);
+  };
+
+  const markAsFiresoftProcessed = async () => {
+    if (!selectedOrder) return;
+
+    const ok = window.confirm(
+      "¿Seguro que ya has pasado físicamente este pedido por Firesoft?\n\n" +
+        "Esto liberará la reserva online y marcará el pedido como preparado."
+    );
+
+    if (!ok) return;
+
+    try {
+      setProcessingFiresoft(true);
+      setFiresoftActionErr(null);
+      setFiresoftActionOk(null);
+
+      const { error: releaseError } = await supabase.rpc("release_online_stock_for_order", {
+        p_order_id: selectedOrder.id,
+      });
+
+      if (releaseError) throw releaseError;
+
+      const now = new Date().toISOString();
+
+      const { data, error: updateError } = await supabase
+        .from("orders")
+        .update({
+          status: "fulfilled",
+          firesoft_processed_at: now,
+        })
+        .eq("id", selectedOrder.id)
+        .select(
+          [
+            "id",
+            "user_id",
+            "guest_token",
+            "customer_email",
+            "customer_name",
+            "customer_phone",
+            "shipping_address",
+            "shipping_method",
+            "shipping_amount",
+            "status",
+            "currency",
+            "total_amount",
+            "stripe_session_id",
+            "paid_at",
+            "stock_reserved",
+            "stock_released",
+            "firesoft_processed_at",
+            "cancelled_at",
+          ].join(",")
+        )
+        .single();
+
+      if (updateError) throw updateError;
+
+      const updated = data as OrderRow;
+
+      setSelectedOrder(updated);
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      setFiresoftActionOk("Pedido marcado como pasado por Firesoft y reserva liberada.");
+      void loadOrders();
+    } catch (e: any) {
+      console.error(e);
+      setFiresoftActionErr(e?.message ?? "Error marcando el pedido como pasado por Firesoft");
+    } finally {
+      setProcessingFiresoft(false);
+    }
   };
 
   const itemsTotal = useMemo(() => {
     return items.reduce((acc, it) => acc + it.unit_price * it.quantity, 0);
   }, [items]);
+
+  const canMarkFiresoftProcessed =
+    selectedOrder?.status === "paid" &&
+    selectedOrder?.stock_reserved === true &&
+    selectedOrder?.stock_released !== true &&
+    !selectedOrder?.firesoft_processed_at;
 
   if (!user) {
     return (
@@ -319,7 +443,7 @@ export default function AdminOrdersManager() {
             className="w-full sm:w-[360px] rounded-full border border-gray-200 px-5 py-2.5 outline-none focus:ring-2 focus:ring-black/10"
           />
 
-          <div className="flex items-center gap-3 rounded-full border border-gray-200 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-200 px-4 py-2.5">
             <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
               <input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} />
               Pagados
@@ -333,18 +457,28 @@ export default function AdminOrdersManager() {
               />
               Pending
             </label>
+
+            <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+              <input
+                type="checkbox"
+                checked={showFulfilled}
+                onChange={(e) => setShowFulfilled(e.target.checked)}
+              />
+              Preparados
+            </label>
           </div>
         </div>
       </div>
 
       <div className="mt-6 rounded-2xl border border-gray-200 overflow-hidden">
         <div className="overflow-auto">
-          <table className="min-w-[1050px] w-full bg-white">
+          <table className="min-w-[1150px] w-full bg-white">
             <thead>
               <tr className="border-b text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                 <th className="px-4 py-3">Pedido</th>
                 <th className="px-4 py-3">Cliente</th>
                 <th className="px-4 py-3">Dirección</th>
+                <th className="px-4 py-3">Estado</th>
                 <th className="px-4 py-3">Pagado</th>
                 <th className="px-4 py-3">Total</th>
                 <th className="px-4 py-3"></th>
@@ -354,19 +488,19 @@ export default function AdminOrdersManager() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-6 text-gray-600" colSpan={6}>
+                  <td className="px-4 py-6 text-gray-600" colSpan={7}>
                     Cargando pedidos…
                   </td>
                 </tr>
               ) : err ? (
                 <tr>
-                  <td className="px-4 py-6 text-red-600" colSpan={6}>
+                  <td className="px-4 py-6 text-red-600" colSpan={7}>
                     {err}
                   </td>
                 </tr>
               ) : orders.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-gray-600" colSpan={6}>
+                  <td className="px-4 py-6 text-gray-600" colSpan={7}>
                     No hay pedidos con esos filtros.
                   </td>
                 </tr>
@@ -391,7 +525,35 @@ export default function AdminOrdersManager() {
                     </td>
 
                     <td className="px-4 py-4">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusClass(
+                          o.status
+                        )}`}
+                      >
+                        {getStatusLabel(o.status)}
+                      </span>
+
+                      <div className="mt-2 text-xs text-gray-500">
+                        Reserva:{" "}
+                        {o.stock_reserved ? (
+                          o.stock_released ? (
+                            <span className="font-semibold text-blue-700">liberada</span>
+                          ) : (
+                            <span className="font-semibold text-green-700">activa</span>
+                          )
+                        ) : (
+                          <span>—</span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-4">
                       <div className="text-sm text-gray-700">{formatDate(o.paid_at)}</div>
+                      {o.firesoft_processed_at ? (
+                        <div className="mt-1 text-xs text-blue-700">
+                          Firesoft: {formatDate(o.firesoft_processed_at)}
+                        </div>
+                      ) : null}
                     </td>
 
                     <td className="px-4 py-4">
@@ -449,16 +611,79 @@ export default function AdminOrdersManager() {
               <div className="rounded-xl border p-4">
                 <div className="text-xs text-gray-500 uppercase">Pagado</div>
                 <div className="mt-2 font-semibold">{formatDate(selectedOrder.paid_at)}</div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Estado: <span className="font-semibold">{selectedOrder.status}</span>
+                <div className="mt-2">
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusClass(
+                      selectedOrder.status
+                    )}`}
+                  >
+                    {getStatusLabel(selectedOrder.status)}
+                  </span>
                 </div>
               </div>
 
-              <div className="rounded-xl border p-4 sm:col-span-2">
-                <div className="text-xs text-gray-500 uppercase">Stripe session</div>
-                <div className="mt-2 text-sm text-gray-800 font-mono break-all">
-                  {selectedOrder.stripe_session_id ?? "—"}
+              <div className="rounded-xl border p-4">
+                <div className="text-xs text-gray-500 uppercase">Reserva online</div>
+                <div className="mt-2 text-sm text-gray-800">
+                  <div>
+                    Reservado:{" "}
+                    <span className="font-semibold">{selectedOrder.stock_reserved ? "Sí" : "No"}</span>
+                  </div>
+                  <div>
+                    Liberado:{" "}
+                    <span className="font-semibold">{selectedOrder.stock_released ? "Sí" : "No"}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    Firesoft: {formatDate(selectedOrder.firesoft_processed_at)}
+                  </div>
                 </div>
+              </div>
+
+              <div className="rounded-xl border p-4">
+                <div className="text-xs text-gray-500 uppercase">Acción Firesoft</div>
+
+                {canMarkFiresoftProcessed ? (
+                  <button
+                    onClick={markAsFiresoftProcessed}
+                    disabled={processingFiresoft}
+                    className="mt-2 w-full rounded-full bg-[#2f5d3a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#24482d] disabled:opacity-60"
+                  >
+                    {processingFiresoft ? "Procesando…" : "Marcar como pasado por Firesoft"}
+                  </button>
+                ) : (
+                  <div className="mt-2 rounded-xl bg-gray-50 p-3 text-sm text-gray-600">
+                    {selectedOrder.status !== "paid"
+                      ? "Solo disponible en pedidos pagados."
+                      : selectedOrder.stock_released
+                      ? "La reserva ya está liberada."
+                      : selectedOrder.firesoft_processed_at
+                      ? "Ya está marcado como pasado por Firesoft."
+                      : "No disponible para este pedido."}
+                  </div>
+                )}
+
+                <p className="mt-2 text-xs text-orange-700">
+                  Pulsa solo después de pasar los productos por Firesoft.
+                </p>
+              </div>
+            </div>
+
+            {firesoftActionErr ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {firesoftActionErr}
+              </div>
+            ) : null}
+
+            {firesoftActionOk ? (
+              <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+                {firesoftActionOk}
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border p-4">
+              <div className="text-xs text-gray-500 uppercase">Stripe session</div>
+              <div className="mt-2 text-sm text-gray-800 font-mono break-all">
+                {selectedOrder.stripe_session_id ?? "—"}
               </div>
             </div>
 

@@ -8,6 +8,8 @@ import VIsitUs from "../containers/VisitUs";
 import Mapa from "../containers/Mapa";
 import Header from "../containers/Header";
 import HeroSaminatura from "../containers/HeroSaminatura.tsx";
+import NewProductsCarousel from "../containers/NewProductsCarousel.tsx"
+import DietaryOptions from "../containers/DietaryOptions.tsx"
 
 type Toast = { type: "success" | "error"; msg: string } | null;
 
@@ -65,10 +67,11 @@ export default function HomePage() {
       )}
 
       <Header />
-      <HeroSaminatura/>
-      <VIsitUs />
-      <Categories />
+      <Inicio/>
+      <Categories />  
+      <DietaryOptions/>
       <Carousel />
+      <NewProductsCarousel/>
       <Mapa />
       <Footer />
       

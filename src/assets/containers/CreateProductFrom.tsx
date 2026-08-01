@@ -30,8 +30,8 @@ interface ProductForm {
   recargoRate: number | null;
   taxCombo: string;
 
-  img: string; // ✅ 1ª URL (principal)
-  extraImages: string[]; // ✅ NUEVO: URLs extra
+  img: string;
+  extraImages: string[];
   stock: number | null;
 
   bio: boolean;
@@ -43,6 +43,15 @@ interface ProductForm {
 
   expirationDate: string | null;
   description: string;
+
+  ingredients: string;
+  nutritionalInfo: string;
+  usageInstructions: string;
+  warnings: string;
+  allergens: string;
+  usageTips: string;
+  medicalDisclaimer: string;
+  storageInstructions: string;
 
   extraVariants: ExtraVariant[];
 }
@@ -80,6 +89,7 @@ type ProductRow = {
   flavor: string | null;
   size: string | null;
 
+  slug?: string | null;
   is_active: boolean | null;
 };
 
@@ -109,30 +119,36 @@ const TAX_COMBOS = [
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
+
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
+
 function keyFamily(category: string, brand: string, name: string) {
   return `${(category ?? "").trim().toLowerCase()}__${(brand ?? "").trim().toLowerCase()}__${(name ?? "")
     .trim()
     .toLowerCase()}`;
 }
+
 function keyVariant(flavor: string | null | undefined, size: string | null | undefined) {
   const f = (flavor ?? "").trim().toLowerCase();
   const s = (size ?? "").trim().toLowerCase();
   return `${f}__${s}`;
 }
 
-// ✅ NUEVO: normaliza URLs (quita espacios)
 function normalizeUrls(urls: string[]) {
   const out: string[] = [];
   for (const u of urls) {
     const t = (u ?? "").trim();
     if (!t) continue;
-    // sin duplicados exactos
     if (!out.includes(t)) out.push(t);
   }
   return out;
+}
+
+function cleanNullableText(value: string | null | undefined) {
+  const t = (value ?? "").trim();
+  return t === "" ? null : t;
 }
 
 type CreateProductFormProps = {
@@ -161,7 +177,7 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     taxCombo: "",
 
     img: "",
-    extraImages: [], // ✅ NUEVO
+    extraImages: [],
     stock: null,
 
     bio: false,
@@ -174,14 +190,23 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     expirationDate: null,
     description: "",
 
+    ingredients: "",
+    nutritionalInfo: "",
+    usageInstructions: "",
+    warnings: "",
+    allergens: "",
+    usageTips: "",
+    medicalDisclaimer: "",
+    storageInstructions: "",
+
     extraVariants: [],
   });
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // ✅ NUEVO: desplegable de imágenes extra
   const [showExtraImages, setShowExtraImages] = useState(false);
+  const [showExtraInfo, setShowExtraInfo] = useState(false);
 
   const addExtraImage = () => {
     setProduct((prev) => ({ ...prev, extraImages: [...prev.extraImages, ""] }));
@@ -200,7 +225,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     setProduct((prev) => ({ ...prev, extraImages: prev.extraImages.filter((_, i) => i !== idx) }));
   };
 
-  // ✅ NUEVO: modo plantilla / añadir variaciones
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateError, setTemplateError] = useState<string>("");
   const [familyOptions, setFamilyOptions] = useState<{ familyKey: string; label: string; sampleRow: ProductRow }[]>([]);
@@ -209,7 +233,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
 
   const isTemplateMode = !!selectedFamilyKey;
 
-  // ✅ SOLO bloquear name en modo plantilla (mantiene tu lógica de “Elegir plantilla”)
   const isFieldLocked = (field: keyof ProductForm) => isTemplateMode && field === "name";
 
   const discountPct = useMemo(() => {
@@ -279,7 +302,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     }));
   };
 
-  // ✅ cargar “familias”
   useEffect(() => {
     let alive = true;
 
@@ -291,7 +313,7 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
         const { data, error } = await supabase
           .from("products")
           .select(
-            "id,category,name,brand,price,old_price,purchase_price,vat_rate,recargo_rate,promo_type,promo_active,img,stock,bio,vegan,gluten_free,lactose_free,supplier_name,expiration_date,description,flavor,size,is_active"
+            "id,category,name,brand,price,old_price,purchase_price,vat_rate,recargo_rate,promo_type,promo_active,img,stock,bio,vegan,gluten_free,lactose_free,supplier_name,expiration_date,description,flavor,size,slug,is_active"
           )
           .eq("is_active", true)
           .order("id", { ascending: false })
@@ -332,7 +354,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     };
   }, []);
 
-  // ✅ plantilla: autocompleta (pero NO bloquea todo; solo name queda bloqueado)
   useEffect(() => {
     let alive = true;
 
@@ -366,10 +387,26 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
       const rec = Number(selected.recargo_rate ?? 0);
       const foundCombo = TAX_COMBOS.find((t) => t.iva === iva && t.recargo === rec);
 
+      let extraInfo: any = null;
+      try {
+        const { data: extraData, error: extraError } = await supabase
+          .from("product_extra_info")
+          .select(
+            "ingredients,nutritional_info,usage_instructions,warnings,allergens,usage_tips,medical_disclaimer,legal_regulation"
+          )
+          .eq("product_id", selected.id)
+          .maybeSingle();
+
+        if (extraError) throw extraError;
+        extraInfo = extraData ?? null;
+      } catch (e) {
+        extraInfo = null;
+      }
+
       setProduct((prev) => ({
         ...prev,
         category: selected.category ?? "",
-        name: selected.name ?? "", // ✅ se autocompleta pero queda bloqueado en UI
+        name: selected.name ?? "",
         brand: selected.brand ?? "",
 
         flavor: "",
@@ -399,10 +436,18 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
         expirationDate: selected.expiration_date ?? null,
         description: selected.description ?? "",
 
+        ingredients: extraInfo?.ingredients ?? "",
+        nutritionalInfo: extraInfo?.nutritional_info ?? "",
+        usageInstructions: extraInfo?.usage_instructions ?? "",
+        warnings: extraInfo?.warnings ?? "",
+        allergens: extraInfo?.allergens ?? "",
+        usageTips: extraInfo?.usage_tips ?? "",
+        medicalDisclaimer: extraInfo?.medical_disclaimer ?? "",
+        storageInstructions: extraInfo?.legal_regulation ?? "",
+
         extraVariants: [],
       }));
 
-      // Carga inicial de variantes existentes (por si acaso), luego se mantiene actualizado con el efecto de abajo
       try {
         const { data, error } = await supabase
           .from("products")
@@ -434,7 +479,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     };
   }, [selectedFamilyKey, familyOptions]);
 
-  // ✅ NUEVO: si editas category/brand (name bloqueado), recalcula duplicados con los valores actuales del formulario
   useEffect(() => {
     let alive = true;
 
@@ -581,13 +625,12 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     return { common, isUnitPromo };
   };
 
-  // ✅ NUEVO: inserta gallery en product_images para cada producto creado
   const insertImagesForProducts = async (
     productIds: number[],
     primaryByProductId: Map<number, string | null>,
     extraUrls: string[]
   ) => {
-    const extras = normalizeUrls(extraUrls); // ya sin vacíos y sin duplicados
+    const extras = normalizeUrls(extraUrls);
     const rows: any[] = [];
 
     for (const pid of productIds) {
@@ -613,6 +656,38 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
     if (error) throw error;
   };
 
+  const saveExtraInfoForProducts = async (
+    insertedProducts: Array<{ id: number; slug?: string | null }>
+  ) => {
+    const payloadBase = {
+      ingredients: cleanNullableText(product.ingredients),
+      nutritional_info: cleanNullableText(product.nutritionalInfo),
+      usage_instructions: cleanNullableText(product.usageInstructions),
+      warnings: cleanNullableText(product.warnings),
+      allergens: cleanNullableText(product.allergens),
+      usage_tips: cleanNullableText(product.usageTips),
+      medical_disclaimer: cleanNullableText(product.medicalDisclaimer),
+      legal_regulation: cleanNullableText(product.storageInstructions),
+    };
+
+    const hasAnyExtraInfo = Object.values(payloadBase).some((v) => v !== null);
+    if (!hasAnyExtraInfo) return;
+
+    const rows = insertedProducts.map((p) => ({
+      product_id: p.id,
+      product_slug: p.slug ?? null,
+      ...payloadBase,
+    }));
+
+    const { error } = await supabase
+      .from("product_extra_info")
+      .upsert(rows, {
+        onConflict: "product_id",
+      });
+
+    if (error) throw error;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -625,15 +700,13 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
 
       const { common } = buildCommonRow();
 
-      // ✅ Galería: la 1ª URL (product.img) es la principal
       const mainImg = (product.img ?? "").trim();
       const extraGalleryUrls = product.extraImages ?? [];
 
-      // ✅ MODO NORMAL: crea base + extras
       if (!isTemplateMode) {
         const baseRow = {
           ...common,
-          img: mainImg || null, // ✅ también guardamos la principal en products.img (legacy)
+          img: mainImg || null,
           stock: product.stock === null ? 0 : Number(product.stock),
           flavor: (product.flavor ?? "").trim() || null,
           size: (product.size ?? "").trim() || null,
@@ -645,7 +718,7 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
             const size = (v.size ?? "").trim();
             if (!flavor && !size) return null;
 
-            const img = (v.img ?? "").trim() || mainImg || null; // ✅ si variante tiene img, esa será la principal de ESA fila
+            const img = (v.img ?? "").trim() || mainImg || null;
             const stock = v.stock === null || Number.isNaN(v.stock) ? 0 : Number(v.stock);
 
             return {
@@ -660,16 +733,26 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
 
         const payload = [baseRow, ...extraRows];
 
-        // ✅ IMPORTANTE: pedimos IDs de lo insertado
-        const { data: inserted, error } = await supabase.from("products").insert(payload).select("id,img");
+        const { data: inserted, error } = await supabase
+          .from("products")
+          .insert(payload)
+          .select("id,img,slug");
+
         if (error) throw error;
 
         const ids = (inserted ?? []).map((r: any) => Number(r.id)).filter((n) => Number.isFinite(n));
+
         const primaryMap = new Map<number, string | null>();
         (inserted ?? []).forEach((r: any) => primaryMap.set(Number(r.id), (r.img ?? null) as string | null));
 
-        // ✅ guardar galería en product_images (primaria + extras)
         await insertImagesForProducts(ids, primaryMap, extraGalleryUrls);
+
+        await saveExtraInfoForProducts(
+          (inserted ?? []).map((r: any) => ({
+            id: Number(r.id),
+            slug: r.slug ?? null,
+          }))
+        );
 
         setMessage(`Producto creado ✅ (${payload.length} filas)`);
         onCreated?.();
@@ -708,14 +791,23 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           expirationDate: null,
           description: "",
 
+          ingredients: "",
+          nutritionalInfo: "",
+          usageInstructions: "",
+          warnings: "",
+          allergens: "",
+          usageTips: "",
+          medicalDisclaimer: "",
+          storageInstructions: "",
+
           extraVariants: [],
         });
 
         setShowExtraImages(false);
+        setShowExtraInfo(false);
         return;
       }
 
-      // ✅ MODO PLANTILLA: añadir variaciones (NO crea base duplicado)
       const candidates: { img: string | null; flavor: string | null; size: string | null; stock: number }[] = [];
 
       const baseFlavor = (product.flavor ?? "").trim();
@@ -736,7 +828,7 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
         const size = (v.size ?? "").trim();
         if (!flavor && !size) continue;
 
-        const img = (v.img ?? "").trim() || mainImg || null; // ✅ principal de esa fila
+        const img = (v.img ?? "").trim() || mainImg || null;
         const stock = v.stock === null || Number.isNaN(v.stock) ? 0 : Number(v.stock);
 
         candidates.push({ img, flavor: flavor || null, size: size || null, stock });
@@ -765,14 +857,26 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
         throw new Error("Todas esas variaciones ya existen (mismo sabor+tamaño).");
       }
 
-      const { data: inserted, error } = await supabase.from("products").insert(toInsert).select("id,img");
+      const { data: inserted, error } = await supabase
+        .from("products")
+        .insert(toInsert)
+        .select("id,img,slug");
+
       if (error) throw error;
 
       const ids = (inserted ?? []).map((r: any) => Number(r.id)).filter((n) => Number.isFinite(n));
+
       const primaryMap = new Map<number, string | null>();
       (inserted ?? []).forEach((r: any) => primaryMap.set(Number(r.id), (r.img ?? null) as string | null));
 
       await insertImagesForProducts(ids, primaryMap, extraGalleryUrls);
+
+      await saveExtraInfoForProducts(
+        (inserted ?? []).map((r: any) => ({
+          id: Number(r.id),
+          slug: r.slug ?? null,
+        }))
+      );
 
       setMessage(
         `Variaciones añadidas ✅ (${toInsert.length} filas)${skipped > 0 ? ` · Omitidas por duplicado: ${skipped}` : ""}`
@@ -851,7 +955,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
       </div>
 
       <form className="grid grid-cols-1 gap-6 pb-10 overflow-visible" onSubmit={handleSubmit}>
-        {/* categoría */}
         <div className="p-2">
           <select
             name="category"
@@ -926,7 +1029,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           />
         </div>
 
-        {/* sabor + tamaño base */}
         <div className="p-2 rounded-lg border border-gray-200 bg-white">
           <div className="text-sm font-semibold text-gray-800">
             {isTemplateMode ? "Nueva variación (para añadir)" : "Sabor + tamaño base"}
@@ -957,7 +1059,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           </div>
         </div>
 
-        {/* venta */}
         <div className="p-2 grid grid-cols-3 gap-4">
           <input
             type="number"
@@ -992,7 +1093,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           />
         </div>
 
-        {/* promos */}
         <div className="p-2">
           <div className="text-sm text-gray-700 mb-2">Promoción por unidades</div>
 
@@ -1057,7 +1157,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           </div>
         </div>
 
-        {/* compra + combo + margen */}
         <div className="p-2 grid grid-cols-3 gap-4">
           <input
             type="number"
@@ -1094,7 +1193,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           />
         </div>
 
-        {/* stock + margen stock */}
         <div className="p-2 grid grid-cols-2 gap-4">
           <input
             type="number"
@@ -1117,7 +1215,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           />
         </div>
 
-        {/* ✅ IMAGEN PRINCIPAL + botón + desplegable de URLs */}
         <div className="p-2">
           <div className="flex gap-2 items-start">
             <input
@@ -1181,7 +1278,101 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           )}
         </div>
 
-        {/* tipos extra */}
+        <div className="p-2 rounded-lg border border-gray-200 bg-white">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">Información extra del producto</div>
+              <div className="text-xs text-gray-500">
+                Se guarda en <b>product_extra_info</b>. Solo se inserta si rellenas alguna casilla.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowExtraInfo((s) => !s)}
+              className="px-3 py-2 rounded-md border border-gray-300 bg-white text-sm hover:bg-gray-50"
+            >
+              {showExtraInfo ? "Ocultar" : "Mostrar"}
+            </button>
+          </div>
+
+          {showExtraInfo && (
+            <div className="mt-4 grid grid-cols-1 gap-4">
+              <textarea
+                name="ingredients"
+                value={product.ingredients}
+                onChange={handleChange}
+                placeholder="Ingredientes"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={4}
+              />
+
+              <textarea
+                name="nutritionalInfo"
+                value={product.nutritionalInfo}
+                onChange={handleChange}
+                placeholder="Información nutricional"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={4}
+              />
+
+              <textarea
+                name="usageInstructions"
+                value={product.usageInstructions}
+                onChange={handleChange}
+                placeholder="Modo de empleo / instrucciones de uso"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={4}
+              />
+
+              <textarea
+                name="warnings"
+                value={product.warnings}
+                onChange={handleChange}
+                placeholder="Advertencias"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={4}
+              />
+
+              <textarea
+                name="allergens"
+                value={product.allergens}
+                onChange={handleChange}
+                placeholder="Alérgenos"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={3}
+              />
+
+              <textarea
+                name="usageTips"
+                value={product.usageTips}
+                onChange={handleChange}
+                placeholder="Consejos de uso"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={3}
+              />
+
+              <textarea
+                name="medicalDisclaimer"
+                value={product.medicalDisclaimer}
+                onChange={handleChange}
+                placeholder="Responsabilidad médica / disclaimer"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={3}
+              />
+
+              <textarea
+                name="storageInstructions"
+                value={product.storageInstructions}
+                onChange={handleChange}
+                placeholder="Regulación legal"
+                className="block w-full rounded-md border-gray-300 shadow-sm p-2 bg-[#f6f6f6]"
+                rows={3}
+              />
+            </div>
+          )}
+        </div>
+
         <div className="p-2 rounded-lg border border-gray-200 bg-white">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -1259,7 +1450,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           )}
         </div>
 
-        {/* flags */}
         <div className="p-2 grid grid-cols-2 md:grid-cols-4 gap-4">
           <label className="flex items-center space-x-2">
             <input type="checkbox" name="bio" checked={product.bio} onChange={handleChange} />
@@ -1282,7 +1472,6 @@ export default function CreateProductForm({ onCreated }: CreateProductFormProps)
           </label>
         </div>
 
-        {/* submit */}
         <div className="col-span-full mt-6 p-2 pb-6">
           <button
             type="submit"

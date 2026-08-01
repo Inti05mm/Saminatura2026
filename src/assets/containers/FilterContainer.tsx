@@ -18,7 +18,7 @@ export interface Filters {
 
 interface Props {
   brands: string[];
-  onApply: (filters: Filters) => void;
+  onApply: (filters: Filters, shouldScroll?: boolean) => void;
 }
 
 const FIXED_CATEGORIES = [
@@ -46,7 +46,9 @@ function parseNum(v: string | null) {
 function normalizeCategoryFromUrl(raw: string | null) {
   if (!raw) return "";
   const decoded = decodeURIComponent(raw);
-  const found = FIXED_CATEGORIES.find((c) => c.toLowerCase() === decoded.toLowerCase());
+  const found = FIXED_CATEGORIES.find(
+    (c) => c.toLowerCase() === decoded.toLowerCase(),
+  );
   return found ?? decoded;
 }
 
@@ -114,7 +116,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       return same ? prev : next;
     });
 
-    onApply(next);
+    onApply(next, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -123,7 +125,12 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       const p = new URLSearchParams(prev);
 
       const setOrDel = (k: string, v: string | number | null | undefined) => {
-        if (v === undefined || v === null || v === "" || (typeof v === "number" && !Number.isFinite(v))) {
+        if (
+          v === undefined ||
+          v === null ||
+          v === "" ||
+          (typeof v === "number" && !Number.isFinite(v))
+        ) {
           p.delete(k);
         } else {
           p.set(k, String(v));
@@ -156,7 +163,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
 
     setFilters(next);
     writeToUrl(next);
-    onApply(next);
+    onApply(next, true);
   };
 
   const setLocalPrice = (patch: Partial<Filters>) => {
@@ -165,7 +172,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
 
   const applyPriceNow = () => {
     writeToUrl(filters);
-    onApply(filters);
+    onApply(filters, true);
   };
 
   const clearAll = () => {
@@ -207,10 +214,12 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       return p;
     });
 
-    onApply(empty);
+    onApply(empty, true);
   };
 
-  const [open, setOpen] = useState<null | "category" | "brand" | "price" | "sort">(null);
+  const [open, setOpen] = useState<
+    null | "category" | "brand" | "price" | "sort"
+  >(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -237,7 +246,9 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       onClick={onClick}
       className={[
         "px-4 py-2 rounded-full text-sm font-semibold border transition whitespace-nowrap",
-        active ? "bg-black text-white border-black" : "bg-white text-gray-800 border-gray-200 hover:bg-gray-50",
+        active
+          ? "bg-black text-white border-black"
+          : "bg-white text-gray-800 border-gray-200 hover:bg-gray-50",
       ].join(" ")}
     >
       {label}
@@ -260,12 +271,17 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       onClick={onClick}
       className={[
         "px-4 py-2 rounded-full text-sm font-semibold border transition flex items-center gap-2 whitespace-nowrap",
-        active ? "bg-black text-white border-black" : "bg-white text-gray-800 border-gray-200 hover:bg-gray-50",
+        active
+          ? "bg-black text-white border-black"
+          : "bg-white text-gray-800 border-gray-200 hover:bg-gray-50",
       ].join(" ")}
     >
       <span>{label}</span>
       <svg
-        className={["h-4 w-4 transition-transform", isOpen ? "rotate-180" : "rotate-0"].join(" ")}
+        className={[
+          "h-4 w-4 transition-transform",
+          isOpen ? "rotate-180" : "rotate-0",
+        ].join(" ")}
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-hidden="true"
@@ -299,27 +315,40 @@ export default function FiltersContainer({ brands, onApply }: Props) {
   const categoryActive = !!filters.category;
   const brandActive = !!filters.brand;
   const sortActive = !!filters.sort;
-  const priceActive = filters.priceFrom !== undefined || filters.priceTo !== undefined;
+  const priceActive =
+    filters.priceFrom !== undefined || filters.priceTo !== undefined;
 
   const sortLabel =
-    filters.sort === "price-asc" ? "Precio ↑" : filters.sort === "price-desc" ? "Precio ↓" : "Ordenar";
+    filters.sort === "price-asc"
+      ? "Precio ↑"
+      : filters.sort === "price-desc"
+        ? "Precio ↓"
+        : "Ordenar";
 
   return (
-    <div ref={rootRef} className="w-full">
+    <div ref={rootRef} className="sticky top-0 z-40 w-full bg-[#fbfaf6] py-2">
       <div className="verde-3 rounded-2xl shadow-sm px-3 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <Chip
-            label={filters.promotionsOnly ? "✅ Promos" : "🔥 Promociones"}
+            label={filters.promotionsOnly ? "✅ Promos" : " Promociones"}
             active={!!filters.promotionsOnly}
-            onClick={() => applyInstant({ promotionsOnly: !filters.promotionsOnly })}
+            onClick={() =>
+              applyInstant({ promotionsOnly: !filters.promotionsOnly })
+            }
           />
 
           <div className="relative text-gray-900">
             <DropBtn
-              label={filters.category ? `Categoría: ${filters.category}` : "Categoría"}
+              label={
+                filters.category
+                  ? `Categoría: ${filters.category}`
+                  : "Categoría"
+              }
               isOpen={open === "category"}
               active={categoryActive}
-              onClick={() => setOpen((v) => (v === "category" ? null : "category"))}
+              onClick={() =>
+                setOpen((v) => (v === "category" ? null : "category"))
+              }
             />
             {open === "category" && (
               <div className="absolute z-20 mt-2 w-64 rounded-2xl border border-gray-200 bg-white shadow-lg p-2">
@@ -396,14 +425,20 @@ export default function FiltersContainer({ brands, onApply }: Props) {
 
           <div className="relative text-black">
             <DropBtn
-              label={priceActive ? `Precio: ${filters.priceFrom ?? "—"} - ${filters.priceTo ?? "—"}` : "Precio"}
+              label={
+                priceActive
+                  ? `Precio: ${filters.priceFrom ?? "—"} - ${filters.priceTo ?? "—"}`
+                  : "Precio"
+              }
               isOpen={open === "price"}
               active={priceActive}
               onClick={() => setOpen((v) => (v === "price" ? null : "price"))}
             />
             {open === "price" && (
               <div className="absolute z-20 mt-2 w-72 rounded-2xl border border-gray-200 bg-white shadow-lg p-3">
-                <div className="text-sm font-semibold text-gray-900 mb-2">Rango de precio</div>
+                <div className="text-sm font-semibold text-gray-900 mb-2">
+                  Rango de precio
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="number"
@@ -412,7 +447,9 @@ export default function FiltersContainer({ brands, onApply }: Props) {
                     className="w-1/2 border rounded-xl p-2"
                     onChange={(e) => {
                       const v = e.target.value;
-                      setLocalPrice({ priceFrom: v === "" ? undefined : Number(v) });
+                      setLocalPrice({
+                        priceFrom: v === "" ? undefined : Number(v),
+                      });
                     }}
                   />
                   <input
@@ -422,7 +459,9 @@ export default function FiltersContainer({ brands, onApply }: Props) {
                     className="w-1/2 border rounded-xl p-2"
                     onChange={(e) => {
                       const v = e.target.value;
-                      setLocalPrice({ priceTo: v === "" ? undefined : Number(v) });
+                      setLocalPrice({
+                        priceTo: v === "" ? undefined : Number(v),
+                      });
                     }}
                   />
                 </div>
@@ -443,10 +482,14 @@ export default function FiltersContainer({ brands, onApply }: Props) {
                     type="button"
                     className="flex-1 py-2 rounded-xl bg-gray-100 text-gray-800 font-semibold"
                     onClick={() => {
-                      const next: Filters = { ...filters, priceFrom: undefined, priceTo: undefined };
+                      const next: Filters = {
+                        ...filters,
+                        priceFrom: undefined,
+                        priceTo: undefined,
+                      };
                       setFilters(next);
                       writeToUrl(next);
-                      onApply(next);
+                      onApply(next, true);
                       setOpen(null);
                     }}
                   >
@@ -483,7 +526,9 @@ export default function FiltersContainer({ brands, onApply }: Props) {
                   type="button"
                   className={[
                     "w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-gray-50",
-                    filters.sort === "price-asc" ? "bg-gray-100 font-semibold" : "",
+                    filters.sort === "price-asc"
+                      ? "bg-gray-100 font-semibold"
+                      : "",
                   ].join(" ")}
                   onClick={() => {
                     applyInstant({ sort: "price-asc" });
@@ -496,7 +541,9 @@ export default function FiltersContainer({ brands, onApply }: Props) {
                   type="button"
                   className={[
                     "w-full text-left px-3 py-2 rounded-xl text-sm hover:bg-gray-50",
-                    filters.sort === "price-desc" ? "bg-gray-100 font-semibold" : "",
+                    filters.sort === "price-desc"
+                      ? "bg-gray-100 font-semibold"
+                      : "",
                   ].join(" ")}
                   onClick={() => {
                     applyInstant({ sort: "price-desc" });
@@ -509,10 +556,26 @@ export default function FiltersContainer({ brands, onApply }: Props) {
             )}
           </div>
 
-          <Chip label="Sin gluten" active={!!filters.glutenFree} onClick={() => applyInstant({ glutenFree: !filters.glutenFree })} />
-          <Chip label="Sin lactosa" active={!!filters.lactoseFree} onClick={() => applyInstant({ lactoseFree: !filters.lactoseFree })} />
-          <Chip label="Vegan" active={!!filters.vegan} onClick={() => applyInstant({ vegan: !filters.vegan })} />
-          <Chip label="Bio" active={!!filters.bio} onClick={() => applyInstant({ bio: !filters.bio })} />
+          <Chip
+            label="Sin gluten"
+            active={!!filters.glutenFree}
+            onClick={() => applyInstant({ glutenFree: !filters.glutenFree })}
+          />
+          <Chip
+            label="Sin lactosa"
+            active={!!filters.lactoseFree}
+            onClick={() => applyInstant({ lactoseFree: !filters.lactoseFree })}
+          />
+          <Chip
+            label="Vegan"
+            active={!!filters.vegan}
+            onClick={() => applyInstant({ vegan: !filters.vegan })}
+          />
+          <Chip
+            label="Bio"
+            active={!!filters.bio}
+            onClick={() => applyInstant({ bio: !filters.bio })}
+          />
 
           <div className="ml-auto flex items-center gap-2">
             <button
@@ -521,7 +584,9 @@ export default function FiltersContainer({ brands, onApply }: Props) {
               disabled={!canClear}
               className={[
                 "px-5 py-2 rounded-full font-semibold",
-                canClear ? "bg-gray-100 text-gray-800 hover:bg-gray-200" : "bg-gray-50 text-gray-400 cursor-not-allowed",
+                canClear
+                  ? "bg-gray-100 text-gray-800 hover:bg-gray-200"
+                  : "bg-gray-50 text-gray-400 cursor-not-allowed",
               ].join(" ")}
             >
               Ver todo

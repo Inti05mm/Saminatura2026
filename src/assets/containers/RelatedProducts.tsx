@@ -12,7 +12,6 @@ type RelatedProduct = {
   old_price: number | null;
   img: string | null;
   stock: number | null;
-  is_active?: boolean;
 };
 
 const FALLBACK_IMG = "https://placehold.co/600x600?text=Sin+imagen";
@@ -71,12 +70,13 @@ export default function RelatedProducts({
         return;
       }
 
+      // public_products ya devuelve únicamente productos:
+      // isgood = true, is_active = true e is_discontinued = false.
       const { data, error } = await supabase
         .from("public_products")
-        .select("id, slug, category, name, brand, price, old_price, img, stock, is_active")
+        .select("id, slug, category, name, brand, price, old_price, img, stock")
         .eq("category", category)
         .neq("id", currentProductId)
-        .eq("is_active", true)
         .order("id", { ascending: false })
         .limit(limit);
 
@@ -100,7 +100,6 @@ export default function RelatedProducts({
           old_price: d.old_price == null ? null : Number(d.old_price),
           img: d.img ?? null,
           stock: d.stock == null ? null : Number(d.stock),
-          is_active: d.is_active ?? true,
         })) ?? [];
 
       setItems(mapped);
@@ -128,7 +127,6 @@ export default function RelatedProducts({
         old_price: null,
         img: null,
         stock: null,
-        is_active: true,
       },
     ];
   }, [items, category]);
@@ -160,7 +158,7 @@ export default function RelatedProducts({
     return (
       <div className="mt-10">
         <div className="w-full px-4 md:px-8">
-          <div className="bg-white rounded-2xl shadow-lg p-6">
+          <div className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-[0_16px_45px_rgba(17,24,39,0.05)]">
             <p className="text-gray-600">Cargando productos relacionados…</p>
           </div>
         </div>
@@ -172,7 +170,7 @@ export default function RelatedProducts({
     return (
       <div className="mt-10">
         <div className="w-full px-4 md:px-8">
-          <div className="bg-white rounded-2xl shadow-lg p-6">
+          <div className="rounded-[28px] border border-gray-200 bg-white p-6 shadow-[0_16px_45px_rgba(17,24,39,0.05)]">
             <p className="text-red-700 font-semibold">No se pudieron cargar relacionados</p>
             <p className="text-gray-600 text-sm mt-1">{err}</p>
           </div>
@@ -186,11 +184,22 @@ export default function RelatedProducts({
   return (
     <div className="mt-10">
       <div className="w-full px-4 md:px-8">
-        <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8">
-          <div className="flex items-end justify-between gap-4">
+        <section
+          className="rounded-[30px] border border-gray-200/80 bg-white px-4 py-6 md:px-7 md:py-8 shadow-[0_18px_55px_rgba(17,24,39,0.055)]"
+          style={{ fontFamily: '"Inter", sans-serif' }}
+        >
+          <div className="flex items-center justify-between gap-5 border-b border-gray-100 pb-5">
             <div>
-              <h2 className="text-xl md:text-2xl font-extrabold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-500 mt-1">Más de la categoría: {category}</p>
+              <div className="flex items-center gap-3">
+                <span className="h-px w-8 bg-gray-300" />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gray-400">
+                  Descubre más
+                </span>
+              </div>
+              <h2 className="mt-2 text-xl font-semibold tracking-[-0.025em] text-gray-950 md:text-2xl">
+                {title}
+              </h2>
+              <p className="mt-1 text-sm font-medium text-gray-500"> {category}</p>
             </div>
 
             {/* controles desktop */}
@@ -199,9 +208,9 @@ export default function RelatedProducts({
                 onClick={goPrev}
                 disabled={!canPrev}
                 className={[
-                  "h-10 w-10 rounded-full flex items-center justify-center",
-                  "border border-gray-200 bg-white shadow-sm",
-                  canPrev ? "hover:bg-gray-50" : "opacity-40 cursor-not-allowed",
+                  "flex h-10 w-10 items-center justify-center rounded-full",
+                  "border border-gray-200 bg-white transition",
+                  canPrev ? "hover:border-gray-400 hover:bg-gray-50" : "opacity-35 cursor-not-allowed",
                 ].join(" ")}
                 aria-label="Anterior"
               >
@@ -218,9 +227,9 @@ export default function RelatedProducts({
                 onClick={goNext}
                 disabled={!canNext}
                 className={[
-                  "h-10 w-10 rounded-full flex items-center justify-center",
-                  "border border-gray-200 bg-white shadow-sm",
-                  canNext ? "hover:bg-gray-50" : "opacity-40 cursor-not-allowed",
+                  "flex h-10 w-10 items-center justify-center rounded-full",
+                  "border border-gray-200 bg-white transition",
+                  canNext ? "hover:border-gray-400 hover:bg-gray-50" : "opacity-35 cursor-not-allowed",
                 ].join(" ")}
                 aria-label="Siguiente"
               >
@@ -280,7 +289,7 @@ export default function RelatedProducts({
               </svg>
             </button>
 
-            <div className="overflow-hidden rounded-2xl">
+            <div className="overflow-hidden">
               <div
                 ref={trackRef}
                 className="flex transition-transform duration-500 ease-in-out"
@@ -299,13 +308,12 @@ export default function RelatedProducts({
                           }}
                           className={[
                             "w-full",
-                            "rounded-2xl border-2 border-dashed border-gray-300",
-                            "bg-gray-50 hover:bg-gray-100 transition",
-                            "p-4 flex flex-col items-center justify-center text-center",
-                            "min-h-[240px]",
+                            "flex min-h-[270px] flex-col items-center justify-center rounded-[22px]",
+                            "border border-dashed border-gray-300 bg-gray-50/70 p-5 text-center",
+                            "transition hover:border-gray-400 hover:bg-gray-50",
                           ].join(" ")}
                         >
-                          <div className="h-12 w-12 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white">
                             <svg viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6 text-gray-800">
                               <path
                                 fillRule="evenodd"
@@ -314,7 +322,7 @@ export default function RelatedProducts({
                               />
                             </svg>
                           </div>
-                          <div className="mt-4 font-extrabold text-gray-900">Ver más de esta categoría</div>
+                          <div className="mt-4 text-sm font-semibold text-gray-950">Ver más de esta categoría</div>
                           <div className="text-sm text-gray-500 mt-1">{category}</div>
                         </button>
                       </div>
@@ -332,29 +340,29 @@ export default function RelatedProducts({
                           const param = s ? `${s}-${p.id}` : String(p.id);
                           navigate(`/shopping/${param}`);
                         }}
-                        className="w-full text-left rounded-2xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition overflow-hidden"
+                        className="group w-full overflow-hidden rounded-[22px] border border-gray-200/80 bg-white text-left transition duration-300 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-[0_14px_34px_rgba(17,24,39,0.08)]"
                       >
-                        <div className="bg-gray-50">
+                        <div className="m-2 overflow-hidden rounded-[16px] bg-gray-50">
                           <img
                             src={img}
                             alt={p.name}
-                            className="w-full h-40 md:h-44 object-contain p-4"
+                            className="h-40 w-full object-contain p-4 transition-transform duration-300 group-hover:scale-[1.03] md:h-44"
                             onError={(e) => {
                               (e.currentTarget as HTMLImageElement).src = FALLBACK_IMG;
                             }}
                           />
                         </div>
 
-                        <div className="p-4">
-                          <div className="text-xs uppercase text-gray-400">{p.category}</div>
-                          <div className="mt-1 font-bold text-gray-900 line-clamp-2">{p.name}</div>
-                          <div className="text-sm text-gray-500">{p.brand}</div>
+                        <div className="px-3 pb-4 pt-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">{p.category}</div>
+                          <div className="mt-2 min-h-[44px] line-clamp-2 text-[15px] font-semibold leading-[1.35] text-gray-950">{p.name}</div>
+                          <div className="mt-1 truncate text-xs font-medium text-gray-500">{p.brand}</div>
 
-                          <div className="mt-3 flex items-end gap-2">
+                          <div className="mt-4 flex items-end gap-2 border-t border-gray-100 pt-3">
                             {p.old_price !== null && p.old_price > p.price ? (
                               <span className="text-sm text-gray-400 line-through">{p.old_price.toFixed(2)}€</span>
                             ) : null}
-                            <span className="text-lg font-extrabold text-gray-900">{p.price.toFixed(2)}€</span>
+                            <span className="text-lg font-semibold tracking-[-0.02em] text-gray-950">{p.price.toFixed(2)}€</span>
                           </div>
                         </div>
                       </button>
@@ -372,8 +380,8 @@ export default function RelatedProducts({
                     key={d}
                     onClick={() => setIndex(d)}
                     className={[
-                      "h-2.5 w-2.5 rounded-full transition",
-                      d === index ? "bg-gray-900" : "bg-gray-300 hover:bg-gray-400",
+                      "h-1.5 rounded-full transition-all duration-300",
+                      d === index ? "w-6 bg-gray-900" : "w-1.5 bg-gray-300 hover:bg-gray-400",
                     ].join(" ")}
                     aria-label={`Ir a ${d + 1}`}
                   />
@@ -381,7 +389,7 @@ export default function RelatedProducts({
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

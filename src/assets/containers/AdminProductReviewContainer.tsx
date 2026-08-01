@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 
-type PromoType = "none" | "percent" | "2x1" | "3x2" | "second_half";
 type ExpirationPrecision = "day" | "month";
+
+type PromoType = "none" | "percent" | "2x1" | "3x2" | "second_half";
 
 type ProductRow = {
   id: number;
@@ -41,19 +42,12 @@ type ProductRow = {
   flavor: string | null;
   size: string | null;
 
+  isgood: boolean;
+  is_discontinued: boolean;
   barcode: string | null;
   firesoft_codigo: string | null;
   firesoft_referencia: string | null;
-  firesoft_last_sync: string | null;
   firesoft_sync_enabled: boolean;
-  isgood: boolean;
-  is_discontinued: boolean;
-
-  variant_group_id: string | null;
-  variant_group_name: string | null;
-  variant_label: string | null;
-  variant_sort: number;
-  variant_is_primary: boolean;
 };
 
 type ProductImageRow = {
@@ -88,12 +82,6 @@ const EMPTY_EXTRA_INFO: ProductExtraInfo = {
 
 const PAGE_SIZE = 20;
 const ADMIN_PRODUCTS_TABLE = "products";
-
-const ADMIN_PRODUCT_SELECT =
-  "id, category, name, brand, price, old_price, purchase_price, vat_rate, recargo_rate, promo_type, promo_active, img, stock, bio, vegan, gluten_free, lactose_free, supplier_name, description, is_active, expiration_date, expiration_date_precision, expiration_date_manual, flavor, size, barcode, firesoft_codigo, firesoft_referencia, firesoft_last_sync, firesoft_sync_enabled, isgood, is_discontinued, variant_group_id, variant_group_name, variant_label, variant_sort, variant_is_primary";
-
-const ADMIN_PRODUCT_SELECT_NO_RECARGO =
-  "id, category, name, brand, price, old_price, purchase_price, vat_rate, promo_type, promo_active, img, stock, bio, vegan, gluten_free, lactose_free, supplier_name, description, is_active, expiration_date, expiration_date_precision, expiration_date_manual, flavor, size, barcode, firesoft_codigo, firesoft_referencia, firesoft_last_sync, firesoft_sync_enabled, isgood, is_discontinued, variant_group_id, variant_group_name, variant_label, variant_sort, variant_is_primary";
 
 const CATEGORIES = [
   "Alimentos",
@@ -152,18 +140,22 @@ function toMonthInputValue(date: string | null) {
 }
 
 function fromMonthInputValue(month: string) {
-  const v = String(month ?? "").trim();
-  return v ? `${v}-01` : null;
+  const value = String(month ?? "").trim();
+  return value ? `${value}-01` : null;
 }
 
-function formatExpiration(date: string | null, precision: ExpirationPrecision = "day") {
+function formatExpiration(
+  date: string | null,
+  precision: ExpirationPrecision = "day"
+) {
   if (!date) return "—";
-  const s = String(date);
+
   if (precision === "month") {
-    const [year, month] = s.slice(0, 7).split("-");
-    return year && month ? `${month}/${year}` : s;
+    const [year, month] = String(date).slice(0, 7).split("-");
+    return year && month ? `${month}/${year}` : String(date);
   }
-  return s;
+
+  return String(date);
 }
 
 function normalizeRow(r: any): ProductRow {
@@ -204,24 +196,13 @@ function normalizeRow(r: any): ProductRow {
     flavor: r.flavor ?? null,
     size: r.size ?? null,
 
+    isgood: !!r.isgood,
+    is_discontinued: !!r.is_discontinued,
     barcode: r.barcode ?? null,
     firesoft_codigo: r.firesoft_codigo ?? null,
     firesoft_referencia: r.firesoft_referencia ?? null,
-    firesoft_last_sync: r.firesoft_last_sync ?? null,
     firesoft_sync_enabled: r.firesoft_sync_enabled ?? true,
-    isgood: !!r.isgood,
-    is_discontinued: !!r.is_discontinued,
-
-    variant_group_id: r.variant_group_id ?? null,
-    variant_group_name: r.variant_group_name ?? null,
-    variant_label: r.variant_label ?? null,
-    variant_sort: Number(r.variant_sort ?? 0),
-    variant_is_primary: !!r.variant_is_primary,
   };
-}
-
-function makeDefaultVariantLabel(r: ProductRow) {
-  return [r.flavor, r.size].filter((x) => String(x ?? "").trim() !== "").join(" · ");
 }
 
 function normalizeExtraInfo(r: any): ProductExtraInfo {
@@ -338,14 +319,13 @@ function normalizeImagesEnsurePrimary(list: ProductImageRow[]) {
   return fixed;
 }
 
-export default function AdminProductsManager() {
+export default function AdminProductReviewContainer() {
   const [search, setSearch] = useState("");
   const [barcodeSearch, setBarcodeSearch] = useState("");
   const [category, setCategory] = useState("");
   const [brand, setBrand] = useState("");
-
-  const [showActive, setShowActive] = useState(true);
-  const [showInactive, setShowInactive] = useState(false);
+  const [showActive, setShowActive] = useState(false);
+  const [showInactive, setShowInactive] = useState(true);
 
   const debouncedSearch = useDebounced(search, 350);
   const debouncedBarcodeSearch = useDebounced(barcodeSearch, 350);
@@ -375,13 +355,6 @@ export default function AdminProductsManager() {
   const [extraInfo, setExtraInfo] = useState<ProductExtraInfo>(EMPTY_EXTRA_INFO);
   const [extraInfoLoading, setExtraInfoLoading] = useState(false);
 
-  const [variantBarcode, setVariantBarcode] = useState("");
-  const [variantBarcodeLoading, setVariantBarcodeLoading] = useState(false);
-  const [variantFoundProduct, setVariantFoundProduct] = useState<ProductRow | null>(null);
-  const [variantGroupProducts, setVariantGroupProducts] = useState<ProductRow[]>([]);
-  const [variantGroupLoading, setVariantGroupLoading] = useState(false);
-  const [variantActionId, setVariantActionId] = useState<number | null>(null);
-
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
   const refreshList = useCallback(async () => {
@@ -389,10 +362,13 @@ export default function AdminProductsManager() {
     setListError(null);
 
     try {
-      let q = supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .select(ADMIN_PRODUCT_SELECT, { count: "exact" })
-        .eq("isgood", true)
+      let q = supabase.from(ADMIN_PRODUCTS_TABLE).select(
+        "id, category, name, brand, price, old_price, purchase_price, vat_rate, recargo_rate, promo_type, promo_active, img, stock, bio, vegan, gluten_free, lactose_free, supplier_name, description, is_active, expiration_date, expiration_date_precision, expiration_date_manual, flavor, size, isgood, is_discontinued, barcode, firesoft_codigo, firesoft_referencia, firesoft_sync_enabled",
+        { count: "exact" }
+      );
+
+      q = q
+        .eq("isgood", false)
         .eq("is_discontinued", false);
 
       if (showActive && !showInactive) q = q.eq("is_active", true);
@@ -405,8 +381,12 @@ export default function AdminProductsManager() {
         return;
       }
 
-      if (debouncedSearch.trim()) q = q.ilike("name", `%${debouncedSearch.trim()}%`);
-      if (debouncedBarcodeSearch.trim()) q = q.ilike("barcode", `%${debouncedBarcodeSearch.trim()}%`);
+      const searchTerm = debouncedSearch.trim();
+      const barcodeTerm = debouncedBarcodeSearch.trim();
+
+      if (searchTerm) q = q.ilike("name", `%${searchTerm}%`);
+      if (barcodeTerm) q = q.ilike("barcode", `%${barcodeTerm}%`);
+
       if (category) q = q.eq("category", category);
       if (brand) q = q.eq("brand", brand);
 
@@ -416,17 +396,24 @@ export default function AdminProductsManager() {
       let { data, error, count } = await q.order("id", { ascending: false }).range(from, to);
 
       if (error && String(error.message || "").toLowerCase().includes("recargo_rate")) {
-        let q2 = supabase
-          .from(ADMIN_PRODUCTS_TABLE)
-          .select(ADMIN_PRODUCT_SELECT_NO_RECARGO, { count: "exact" })
-          .eq("isgood", true)
+        let q2 = supabase.from(ADMIN_PRODUCTS_TABLE).select(
+          "id, category, name, brand, price, old_price, purchase_price, vat_rate, promo_type, promo_active, img, stock, bio, vegan, gluten_free, lactose_free, supplier_name, description, is_active, expiration_date, expiration_date_precision, expiration_date_manual, flavor, size, isgood, is_discontinued, barcode, firesoft_codigo, firesoft_referencia, firesoft_sync_enabled",
+          { count: "exact" }
+        );
+
+        q2 = q2
+          .eq("isgood", false)
           .eq("is_discontinued", false);
 
         if (showActive && !showInactive) q2 = q2.eq("is_active", true);
         if (!showActive && showInactive) q2 = q2.eq("is_active", false);
 
-        if (debouncedSearch.trim()) q2 = q2.ilike("name", `%${debouncedSearch.trim()}%`);
-        if (debouncedBarcodeSearch.trim()) q2 = q2.ilike("barcode", `%${debouncedBarcodeSearch.trim()}%`);
+        const searchTermFallback = debouncedSearch.trim();
+        const barcodeTermFallback = debouncedBarcodeSearch.trim();
+
+        if (searchTermFallback) q2 = q2.ilike("name", `%${searchTermFallback}%`);
+        if (barcodeTermFallback) q2 = q2.ilike("barcode", `%${barcodeTermFallback}%`);
+
         if (category) q2 = q2.eq("category", category);
         if (brand) q2 = q2.eq("brand", brand);
 
@@ -465,60 +452,10 @@ export default function AdminProductsManager() {
     };
   }, [refreshList]);
 
-  const [brands, setBrands] = useState<string[]>([""]);
-
-  useEffect(() => {
-    let alive = true;
-
-    const loadAllBrands = async () => {
-      try {
-        const collectedBrands: string[] = [];
-        const chunkSize = 1000;
-        let from = 0;
-
-        while (true) {
-          const to = from + chunkSize - 1;
-
-          const { data, error } = await supabase
-            .from(ADMIN_PRODUCTS_TABLE)
-            .select("brand")
-            .eq("isgood", true)
-            .eq("is_discontinued", false)
-            .not("brand", "is", null)
-            .order("brand", { ascending: true })
-            .range(from, to);
-
-          if (error) throw error;
-          if (!alive) return;
-
-          const batch = (data ?? [])
-            .map((row: any) => String(row.brand ?? "").trim())
-            .filter(Boolean);
-
-          collectedBrands.push(...batch);
-
-          if ((data ?? []).length < chunkSize) break;
-
-          from += chunkSize;
-        }
-
-        const uniqueBrands = Array.from(new Set(collectedBrands)).sort((a, b) =>
-          a.localeCompare(b, "es", { sensitivity: "base" })
-        );
-
-        if (alive) setBrands(["", ...uniqueBrands]);
-      } catch (error) {
-        console.error("Error cargando marcas:", error);
-        if (alive) setBrands([""]);
-      }
-    };
-
-    void loadAllBrands();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const brands = useMemo(() => {
+    const set = new Set(rows.map((r) => r.brand).filter(Boolean));
+    return ["", ...Array.from(set).sort()];
+  }, [rows]);
 
   const loadImagesForProduct = useCallback(async (productId: number) => {
     setImagesLoading(true);
@@ -577,332 +514,6 @@ export default function AdminProductsManager() {
     }
   }, []);
 
-
-  const loadVariantGroupProducts = useCallback(async (groupId: string | null) => {
-    if (!groupId) {
-      setVariantGroupProducts([]);
-      return;
-    }
-
-    setVariantGroupLoading(true);
-
-    try {
-      const { data, error } = await supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .select(ADMIN_PRODUCT_SELECT)
-        .eq("variant_group_id", groupId)
-        .eq("is_discontinued", false)
-        .order("variant_sort", { ascending: true })
-        .order("id", { ascending: true });
-
-      if (error) throw error;
-
-      setVariantGroupProducts((data ?? []).map(normalizeRow));
-    } catch (e: any) {
-      console.error(e);
-      setVariantGroupProducts([]);
-      setSaveMsg(`Error cargando variantes ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setVariantGroupLoading(false);
-    }
-  }, []);
-
-  const createOrUseVariantGroup = useCallback(async () => {
-    if (!editing) throw new Error("No hay producto en edición");
-
-    const groupId = editing.variant_group_id || crypto.randomUUID();
-    const label = makeDefaultVariantLabel(editing) || null;
-
-    const patch = {
-      variant_group_id: groupId,
-      // No se edita el nombre del grupo: queda igual que el nombre del producto.
-      // Solo lo guardamos por compatibilidad si lo usas en la vista pública.
-      variant_group_name: editing.name.trim() || null,
-      variant_label: label,
-      variant_sort: Number(editing.variant_sort ?? 0),
-      variant_is_primary: true,
-    };
-
-    const { error } = await supabase.from(ADMIN_PRODUCTS_TABLE).update(patch).eq("id", editing.id);
-    if (error) throw error;
-
-    const next = { ...editing, ...patch };
-    setEditing(next);
-    setRows((prev) => prev.map((r) => (r.id === editing.id ? next : r)));
-    await loadVariantGroupProducts(groupId);
-
-    return groupId;
-  }, [editing, loadVariantGroupProducts]);
-
-  const handleCreateVariantGroup = async () => {
-    if (!editing) return;
-
-    setSaving(true);
-    setSaveMsg(null);
-
-    try {
-      await createOrUseVariantGroup();
-      setSaveMsg("Grupo de variantes creado ✅");
-      await refreshList();
-    } catch (e: any) {
-      console.error(e);
-      setSaveMsg(`Error creando grupo ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const attachProductToVariantGroup = async (productToAttach: ProductRow) => {
-    if (!editing) return;
-
-    setVariantActionId(productToAttach.id);
-    setSaving(true);
-    setSaveMsg(null);
-
-    try {
-      let groupId = editing.variant_group_id;
-
-      if (!groupId) {
-        groupId = await createOrUseVariantGroup();
-      }
-
-      const nextSort =
-        variantGroupProducts.length > 0
-          ? Math.max(...variantGroupProducts.map((p) => Number(p.variant_sort ?? 0))) + 1
-          : 1;
-
-      const patch = {
-        variant_group_id: groupId,
-        variant_group_name: editing.name.trim() || null,
-        variant_label: makeDefaultVariantLabel(productToAttach) || null,
-        variant_sort: Number(productToAttach.variant_sort && productToAttach.variant_sort > 0 ? productToAttach.variant_sort : nextSort),
-        variant_is_primary: false,
-      };
-
-      const { error } = await supabase.from(ADMIN_PRODUCTS_TABLE).update(patch).eq("id", productToAttach.id);
-      if (error) throw error;
-
-      setVariantFoundProduct(null);
-      setVariantBarcode("");
-      await loadVariantGroupProducts(groupId);
-      await refreshList();
-
-      setSaveMsg(`Producto #${productToAttach.id} relacionado como variante ✅`);
-    } catch (e: any) {
-      console.error(e);
-      setSaveMsg(`Error relacionando variante ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setVariantActionId(null);
-      setSaving(false);
-    }
-  };
-
-  const searchVariantByBarcode = useCallback(async () => {
-    if (!editing) return;
-
-    const code = variantBarcode.trim().replace(/\s+/g, "");
-    setVariantFoundProduct(null);
-    setSaveMsg(null);
-
-    if (!code) {
-      setSaveMsg("Introduce un código de barras para buscar.");
-      return;
-    }
-
-    if (editing.barcode && code === editing.barcode) {
-      setSaveMsg("Ese código de barras es el producto que estás editando.");
-      return;
-    }
-
-    setVariantBarcodeLoading(true);
-
-    try {
-      const { data, error } = await supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .select(ADMIN_PRODUCT_SELECT)
-        .eq("barcode", code)
-        .eq("is_discontinued", false)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) {
-        setSaveMsg(`No he encontrado ningún producto con el barcode ${code}.`);
-        return;
-      }
-
-      const found = normalizeRow(data);
-
-      if (found.id === editing.id) {
-        setSaveMsg("Ese código de barras es el producto que estás editando.");
-        return;
-      }
-
-      if (editing.variant_group_id && found.variant_group_id === editing.variant_group_id) {
-        setSaveMsg("Ese producto ya está dentro de este grupo de variantes.");
-        return;
-      }
-
-      setVariantFoundProduct(found);
-    } catch (e: any) {
-      console.error(e);
-      setVariantFoundProduct(null);
-      setSaveMsg(`Error buscando por barcode ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setVariantBarcodeLoading(false);
-    }
-  }, [editing, variantBarcode]);
-
-  const attachFoundVariantByBarcode = async () => {
-    if (!editing || !variantFoundProduct) return;
-
-    const sameName = editing.name.trim().toLowerCase() === variantFoundProduct.name.trim().toLowerCase();
-
-    if (!sameName) {
-      const ok = confirm(
-        `Ojo: el producto encontrado no tiene exactamente el mismo nombre.\n\nActual: ${editing.name}\nEncontrado: ${variantFoundProduct.name}\n\n¿Relacionarlo igualmente?`
-      );
-      if (!ok) return;
-    }
-
-    if (variantFoundProduct.variant_group_id && variantFoundProduct.variant_group_id !== editing.variant_group_id) {
-      const ok = confirm(
-        `Este producto ya pertenece a otro grupo de variantes.\n\n¿Quieres moverlo al grupo de este producto?`
-      );
-      if (!ok) return;
-    }
-
-    await attachProductToVariantGroup(variantFoundProduct);
-  };
-
-  const removeProductFromVariantGroup = async (product: ProductRow) => {
-    const ok = confirm(`¿Quitar "${product.name}" del grupo de variantes?`);
-    if (!ok) return;
-
-    setVariantActionId(product.id);
-    setSaving(true);
-    setSaveMsg(null);
-
-    try {
-      const oldGroupId = product.variant_group_id;
-
-      const { error } = await supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .update({
-          variant_group_id: null,
-          variant_group_name: null,
-          variant_label: null,
-          variant_sort: 0,
-          variant_is_primary: false,
-        })
-        .eq("id", product.id);
-
-      if (error) throw error;
-
-      if (editing?.id === product.id) {
-        const next = {
-          ...editing,
-          variant_group_id: null,
-          variant_group_name: null,
-          variant_label: null,
-          variant_sort: 0,
-          variant_is_primary: false,
-        };
-        setEditing(next);
-        setVariantGroupProducts([]);
-        setRows((prev) => prev.map((r) => (r.id === product.id ? next : r)));
-      } else {
-        await loadVariantGroupProducts(oldGroupId);
-      }
-
-      await refreshList();
-      setSaveMsg("Producto quitado del grupo ✅");
-    } catch (e: any) {
-      console.error(e);
-      setSaveMsg(`Error quitando variante ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setVariantActionId(null);
-      setSaving(false);
-    }
-  };
-
-  const setPrimaryVariant = async (product: ProductRow) => {
-    if (!product.variant_group_id) return;
-
-    setVariantActionId(product.id);
-    setSaving(true);
-    setSaveMsg(null);
-
-    try {
-      const groupId = product.variant_group_id;
-
-      const { error: clearError } = await supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .update({ variant_is_primary: false })
-        .eq("variant_group_id", groupId);
-
-      if (clearError) throw clearError;
-
-      const { error: setError } = await supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .update({ variant_is_primary: true })
-        .eq("id", product.id);
-
-      if (setError) throw setError;
-
-      if (editing) {
-        setEditing({ ...editing, variant_is_primary: editing.id === product.id });
-      }
-
-      await loadVariantGroupProducts(groupId);
-      await refreshList();
-      setSaveMsg(`Producto #${product.id} marcado como principal ✅`);
-    } catch (e: any) {
-      console.error(e);
-      setSaveMsg(`Error cambiando principal ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setVariantActionId(null);
-      setSaving(false);
-    }
-  };
-
-  const updateVariantProduct = async (product: ProductRow, patch: Partial<ProductRow>) => {
-    setVariantActionId(product.id);
-    setSaveMsg(null);
-
-    try {
-      const nextFlavor = "flavor" in patch ? patch.flavor?.trim() || null : product.flavor;
-      const nextSize = "size" in patch ? patch.size?.trim() || null : product.size;
-
-      const payload: any = {};
-
-      if ("flavor" in patch) payload.flavor = nextFlavor;
-      if ("size" in patch) payload.size = nextSize;
-      if ("variant_sort" in patch) payload.variant_sort = Number(patch.variant_sort ?? 0);
-
-      if ("flavor" in patch || "size" in patch) {
-        payload.variant_label = [nextFlavor, nextSize]
-          .filter((x) => String(x ?? "").trim() !== "")
-          .join(" · ") || null;
-      }
-
-      if (Object.keys(payload).length === 0) return;
-
-      const { error } = await supabase.from(ADMIN_PRODUCTS_TABLE).update(payload).eq("id", product.id);
-      if (error) throw error;
-
-      if (editing?.id === product.id) setEditing((prev) => (prev ? { ...prev, ...payload } : prev));
-      if (product.variant_group_id) await loadVariantGroupProducts(product.variant_group_id);
-      setRows((prev) => prev.map((r) => (r.id === product.id ? { ...r, ...payload } : r)));
-
-      setSaveMsg("Variante actualizada ✅");
-    } catch (e: any) {
-      console.error(e);
-      setSaveMsg(`Error actualizando variante ❌: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setVariantActionId(null);
-    }
-  };
-
   const openEdit = useCallback(
     async (r: ProductRow) => {
       setSaveMsg(null);
@@ -922,13 +533,9 @@ export default function AdminProductsManager() {
       tempImageIdRef.current = -1;
       setExtraInfo(EMPTY_EXTRA_INFO);
 
-      await Promise.all([
-        loadImagesForProduct(r.id),
-        loadExtraInfoForProduct(r.id),
-        loadVariantGroupProducts(r.variant_group_id),
-      ]);
+      await Promise.all([loadImagesForProduct(r.id), loadExtraInfoForProduct(r.id)]);
     },
-    [loadImagesForProduct, loadExtraInfoForProduct, loadVariantGroupProducts]
+    [loadImagesForProduct, loadExtraInfoForProduct]
   );
 
   const closeEdit = () => {
@@ -942,10 +549,6 @@ export default function AdminProductsManager() {
     tempImageIdRef.current = -1;
 
     setExtraInfo(EMPTY_EXTRA_INFO);
-
-    setVariantBarcode("");
-    setVariantFoundProduct(null);
-    setVariantGroupProducts([]);
   };
 
   const onEditChange = (patch: Partial<ProductRow>) => {
@@ -1231,8 +834,6 @@ export default function AdminProductsManager() {
           ? null
           : Number(editing.old_price),
 
-        // Datos editables de tienda.
-        // El coste se puede corregir manualmente cuando Firesoft no trae el dato bien.
         purchase_price:
           editing.purchase_price === null || (editing.purchase_price as any) === ""
             ? null
@@ -1252,26 +853,18 @@ export default function AdminProductsManager() {
 
         description: editing.description?.trim() || null,
 
-        // Caducidad editable manualmente. Para mes/año guardamos el día 01
-        // y la precisión en expiration_date_precision para mostrar MM/AAAA.
-        expiration_date: editing.expiration_date || null,
+        expiration_date: editing.expiration_date && editing.expiration_date.trim() !== "" ? editing.expiration_date : null,
         expiration_date_precision: editing.expiration_date_precision ?? "day",
         expiration_date_manual: true,
 
-        // No guardamos stock aquí porque viene de Firesoft.
         promo_type: editing.promo_active ? editing.promo_type : "none",
         promo_active: !!editing.promo_active && editing.promo_type !== "none",
 
         flavor: editing.flavor?.trim() || null,
         size: editing.size?.trim() || null,
 
-        variant_group_id: editing.variant_group_id,
-        variant_group_name: editing.variant_group_id ? editing.name.trim() || null : null,
-        variant_label: [editing.flavor?.trim() || null, editing.size?.trim() || null]
-          .filter((x) => String(x ?? "").trim() !== "")
-          .join(" · ") || null,
-        variant_sort: Number(editing.variant_sort ?? 0),
-        variant_is_primary: !!editing.variant_is_primary,
+        isgood: true,
+        is_active: true,
       };
 
       const { error } = await supabase.from(ADMIN_PRODUCTS_TABLE).update(payload).eq("id", editing.id);
@@ -1289,23 +882,18 @@ export default function AdminProductsManager() {
         promo_active: payload.promo_active,
         old_price: payload.old_price,
         price: payload.price,
-        purchase_price: payload.purchase_price,
-        expiration_date: payload.expiration_date,
-        expiration_date_precision: payload.expiration_date_precision,
-        expiration_date_manual: payload.expiration_date_manual,
         flavor: payload.flavor,
         size: payload.size,
         img: primaryNow,
-        variant_group_id: payload.variant_group_id,
-        variant_group_name: payload.variant_group_name,
-        variant_label: payload.variant_label,
-        variant_sort: payload.variant_sort,
-        variant_is_primary: payload.variant_is_primary,
+        isgood: true,
+        is_active: true,
       };
 
-      setSaveMsg("Guardado ✅");
-      setRows((prev) => prev.map((r) => (r.id === editing.id ? nextLocal : r)));
-      setEditing(nextLocal);
+      void nextLocal;
+      setSaveMsg("Guardado y marcado como revisado ✅");
+      setRows((prev) => prev.filter((r) => r.id !== editing.id));
+      setTotal((t) => Math.max(0, t - 1));
+      closeEdit();
     } catch (e: any) {
       console.error(e);
       setSaveMsg(`Error guardando ❌: ${e?.message ?? "desconocido"}`);
@@ -1314,60 +902,14 @@ export default function AdminProductsManager() {
     }
   };
 
-  const toggleActive = async (r: ProductRow) => {
-    if (!r.isgood) {
-      alert("Primero debes marcar el producto como revisado.");
-      return;
-    }
-
+  const markAsReviewed = async (r: ProductRow) => {
     if (r.is_discontinued) {
-      alert("Este producto está descatalogado en Firesoft y no puede publicarse.");
+      alert("Este producto está descatalogado en Firesoft.");
       return;
     }
 
-    const next = !r.is_active;
-
     const ok = confirm(
-      next
-        ? `¿Mostrar "${r.name}" en la tienda?`
-        : `¿Ocultar "${r.name}" de la tienda?`
-    );
-    if (!ok) return;
-
-    setDeletingId(r.id);
-
-    try {
-      const { error } = await supabase
-        .from(ADMIN_PRODUCTS_TABLE)
-        .update({ is_active: next })
-        .eq("id", r.id);
-
-      if (error) throw error;
-
-      const keepInList = (next && showActive) || (!next && showInactive);
-
-      setRows((prev) => {
-        if (keepInList) {
-          return prev.map((x) =>
-            x.id === r.id ? { ...x, is_active: next } : x
-          );
-        }
-
-        return prev.filter((x) => x.id !== r.id);
-      });
-
-      if (!keepInList) setTotal((t) => Math.max(0, t - 1));
-      if (editing?.id === r.id) closeEdit();
-    } catch (e: any) {
-      alert(`Error actualizando visibilidad: ${e?.message ?? "desconocido"}`);
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const markAsPending = async (r: ProductRow) => {
-    const ok = confirm(
-      `¿Mover "${r.name}" a productos pendientes? También se ocultará de la tienda.`
+      `¿Marcar "${r.name}" como revisado y publicarlo directamente?`
     );
     if (!ok) return;
 
@@ -1377,8 +919,8 @@ export default function AdminProductsManager() {
       const { error } = await supabase
         .from(ADMIN_PRODUCTS_TABLE)
         .update({
-          isgood: false,
-          is_active: false,
+          isgood: true,
+          is_active: true,
         })
         .eq("id", r.id);
 
@@ -1389,7 +931,7 @@ export default function AdminProductsManager() {
 
       if (editing?.id === r.id) closeEdit();
     } catch (e: any) {
-      alert(`Error moviendo a pendientes: ${e?.message ?? "desconocido"}`);
+      alert(`Error marcando como revisado: ${e?.message ?? "desconocido"}`);
     } finally {
       setDeletingId(null);
     }
@@ -1400,8 +942,8 @@ export default function AdminProductsManager() {
     setBarcodeSearch("");
     setCategory("");
     setBrand("");
-    setShowActive(true);
-    setShowInactive(false);
+    setShowActive(false);
+    setShowInactive(true);
     setPage(1);
   };
 
@@ -1421,8 +963,8 @@ export default function AdminProductsManager() {
 
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Gestionar productos</h2>
-          <p className="text-sm text-gray-600">Productos revisados. Puedes editar sus datos, publicarlos u ocultarlos sin perder el estado de revisión. Paginación server-side ({PAGE_SIZE} por página).</p>
+          <h2 className="text-2xl font-bold text-gray-900">Revisión de productos pendientes</h2>
+          <p className="text-sm text-gray-600">Edita productos pendientes. Al guardar se marcan como revisados y quedan activos en la tienda.</p>
         </div>
 
         <div className="flex flex-col gap-2 md:flex-row md:items-center">
@@ -1433,17 +975,17 @@ export default function AdminProductsManager() {
               setSearch(e.target.value);
             }}
             placeholder="Buscar por nombre…"
-            className="w-full md:w-64 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+            className="w-full md:w-72 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
           />
 
           <input
             value={barcodeSearch}
             onChange={(e) => {
               setPage(1);
-              setBarcodeSearch(e.target.value.replace(/\s+/g, ""));
+              setBarcodeSearch(e.target.value);
             }}
             placeholder="Buscar por código de barras…"
-            className="w-full md:w-56 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+            className="w-full md:w-60 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
           />
 
           <select
@@ -1470,15 +1012,11 @@ export default function AdminProductsManager() {
             }}
             className="w-full md:w-48 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
           >
-            <option value="">Todas las marcas</option>
-
-            {brands
-              .filter((brandName) => brandName !== "")
-              .map((brandName) => (
-                <option key={brandName} value={brandName}>
-                  {brandName}
-                </option>
-              ))}
+            {brands.map((b) => (
+              <option key={b || "all"} value={b}>
+                {b ? `Marca: ${b}` : "Todas las marcas"}
+              </option>
+            ))}
           </select>
 
           <div className="flex items-center gap-4 px-1">
@@ -1553,7 +1091,6 @@ export default function AdminProductsManager() {
               </div>
             </div>
 
-
             <div className="overflow-auto">
               <table className="min-w-[1250px] w-full text-sm">
                 <thead className="bg-gray-50 text-gray-700">
@@ -1561,7 +1098,6 @@ export default function AdminProductsManager() {
                     <th className="text-left px-4 py-3">ID</th>
                     <th className="text-left px-4 py-3">Producto</th>
                     <th className="text-left px-4 py-3">Variación</th>
-                    <th className="text-left px-4 py-3">Grupo</th>
                     <th className="text-left px-4 py-3">Categoría</th>
                     <th className="text-left px-4 py-3">Marca</th>
                     <th className="text-left px-4 py-3">PVP</th>
@@ -1599,17 +1135,7 @@ export default function AdminProductsManager() {
                             />
                             <div>
                               <div className="font-semibold text-gray-900">{r.name}</div>
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
-                                  Revisado
-                                </span>
-                                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${r.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-700"}`}>
-                                  {r.is_active ? "Visible" : "Oculto"}
-                                </span>
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                Barcode: <span className="font-mono">{r.barcode || "—"}</span>
-                              </div>
+                              {r.barcode && <div className="text-xs text-gray-500">Código: {r.barcode}</div>}
                               {r.old_price !== null && (
                                 <div className="text-xs text-gray-500">
                                   Antes: <del>{Number(r.old_price).toFixed(2)}€</del>
@@ -1620,21 +1146,6 @@ export default function AdminProductsManager() {
                         </td>
 
                         <td className="px-4 py-3 text-gray-700">{attrsStr}</td>
-
-                        <td className="px-4 py-3">
-                          {r.variant_group_id ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="w-fit px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-xs">
-                                {r.variant_is_primary ? "Principal" : "Variante"}
-                              </span>
-                              <span className="text-xs text-gray-500 max-w-[180px] truncate">
-                                Grupo de variantes
-                              </span>
-                            </div>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
 
                         <td className="px-4 py-3">{r.category}</td>
                         <td className="px-4 py-3">{r.brand}</td>
@@ -1664,35 +1175,14 @@ export default function AdminProductsManager() {
                         <td className="px-4 py-3">{r.supplier_name?.trim() ? r.supplier_name : "—"}</td>
 
                         <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => openEdit(r)}
-                            className="px-3 py-1 rounded-md border border-gray-300 text-sm hover:bg-gray-100"
-                          >
-                            Editar
-                          </button>
+                         
 
                           <button
-                            onClick={() => toggleActive(r)}
+                            onClick={() => markAsReviewed(r)}
                             disabled={deletingId === r.id || r.is_discontinued}
-                            className={`ml-2 px-3 py-1 rounded-md border text-sm disabled:opacity-50 ${
-                              r.is_active
-                                ? "border-red-300 text-red-700 hover:bg-red-50"
-                                : "border-green-300 text-green-700 hover:bg-green-50"
-                            }`}
+                            className="ml-2 px-3 py-1 rounded-md border border-blue-300 text-blue-800 text-sm hover:bg-blue-50 disabled:opacity-50"
                           >
-                            {deletingId === r.id
-                              ? "Actualizando…"
-                              : r.is_active
-                              ? "Ocultar"
-                              : "Mostrar"}
-                          </button>
-
-                          <button
-                            onClick={() => markAsPending(r)}
-                            disabled={deletingId === r.id}
-                            className="ml-2 px-3 py-1 rounded-md border border-amber-300 text-amber-800 text-sm hover:bg-amber-50 disabled:opacity-50"
-                          >
-                            Volver a pendientes
+                            {deletingId === r.id ? "Actualizando…" : "Marcar revisado"}
                           </button>
                         </td>
                       </tr>
@@ -1701,7 +1191,7 @@ export default function AdminProductsManager() {
 
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={15} className="px-4 py-10 text-center text-gray-600">
+                      <td colSpan={14} className="px-4 py-10 text-center text-gray-600">
                         No hay resultados con esos filtros.
                       </td>
                     </tr>
@@ -1721,7 +1211,7 @@ export default function AdminProductsManager() {
                 <img src={primaryPreviewUrl} alt={editing.name} className="h-12 w-12 rounded-md object-cover border" />
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">Editar producto #{editing.id}</h3>
-                  <p className="text-xs text-gray-500">Edita datos de tienda. Stock y caducidad vienen de Firesoft; PVP y coste son editables.</p>
+                  <p className="text-xs text-gray-500">Al guardar se marca como revisado y activo</p>
                 </div>
               </div>
 
@@ -1787,11 +1277,14 @@ export default function AdminProductsManager() {
                         value={editing.expiration_date_precision ?? "day"}
                         onChange={(e) => {
                           const precision = normalizeExpirationPrecision(e.target.value);
+
                           onEditChange({
                             expiration_date_precision: precision,
                             expiration_date:
                               precision === "month"
-                                ? fromMonthInputValue(toMonthInputValue(editing.expiration_date))
+                                ? fromMonthInputValue(
+                                    toMonthInputValue(editing.expiration_date)
+                                  )
                                 : editing.expiration_date,
                             expiration_date_manual: true,
                           });
@@ -1831,7 +1324,7 @@ export default function AdminProductsManager() {
                     </div>
 
                     <div className="mt-1 text-xs text-gray-500">
-                      Se guarda manualmente y queda protegida para que la API no la sobrescriba.
+                      Al guardarla manualmente, la API no la sobrescribirá.
                     </div>
                   </label>
 
@@ -1844,9 +1337,11 @@ export default function AdminProductsManager() {
                       value={editing.stock ?? 0}
                       readOnly
                       disabled
-                      title="Viene de Firesoft y se actualiza automáticamente"
+                      title="El stock viene de Firesoft"
                     />
-                    <div className="mt-1 text-xs text-gray-500">Solo lectura: viene de Firesoft.</div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      Solo lectura: se sincroniza desde Firesoft.
+                    </div>
                   </label>
                 </div>
 
@@ -1870,258 +1365,6 @@ export default function AdminProductsManager() {
                         value={editing.size ?? ""}
                         onChange={(e) => onEditChange({ size: e.target.value || null })}
                       />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="mt-5 rounded-lg border border-purple-200 bg-purple-50 p-4">
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">Variantes del mismo producto</div>
-                      <div className="text-xs text-gray-600">
-                        Relaciona otro producto existente usando su código de barras. El nombre del grupo no se edita: se usa el mismo nombre del producto.
-                      </div>
-                    </div>
-
-                    {editing.variant_group_id ? (
-                      <button
-                        type="button"
-                        onClick={() => removeProductFromVariantGroup(editing)}
-                        disabled={saving}
-                        className="px-3 py-2 rounded-md border border-red-300 text-red-700 bg-white text-sm hover:bg-red-50 disabled:opacity-50"
-                      >
-                        Quitar de grupo
-                      </button>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-md border border-purple-100 bg-white p-3">
-                    <div className="text-sm font-semibold text-gray-800 mb-1">Relacionar por código de barras</div>
-                    <div className="text-xs text-gray-500 mb-3">
-                      Pega el barcode del otro producto. Si este producto aún no tiene grupo, se creará automáticamente y ambos quedarán unidos.
-                    </div>
-
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                      <input
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                        value={variantBarcode}
-                        onChange={(e) => {
-                          setVariantBarcode(e.target.value.replace(/\s+/g, ""));
-                          setVariantFoundProduct(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void searchVariantByBarcode();
-                          }
-                        }}
-                        placeholder="Código de barras del producto a relacionar…"
-                      />
-
-                      <button
-                        type="button"
-                        onClick={searchVariantByBarcode}
-                        disabled={variantBarcodeLoading || !variantBarcode.trim()}
-                        className="px-3 py-2 rounded-md bg-black text-white text-sm hover:bg-gray-900 disabled:opacity-50"
-                      >
-                        {variantBarcodeLoading ? "Buscando…" : "Buscar"}
-                      </button>
-                    </div>
-
-                    {variantFoundProduct && (
-                      <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <img
-                              src={variantFoundProduct.img && variantFoundProduct.img.trim() !== "" ? variantFoundProduct.img : "https://placehold.co/48x48?text=IMG"}
-                              alt={variantFoundProduct.name}
-                              className="h-10 w-10 rounded-md object-cover border bg-white"
-                            />
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-gray-900 truncate">
-                                #{variantFoundProduct.id} · {variantFoundProduct.name}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                {variantFoundProduct.brand} · {variantFoundProduct.flavor || "—"} · {variantFoundProduct.size || "—"} · Barcode:{" "}
-                                <span className="font-mono">{variantFoundProduct.barcode || "—"}</span>
-                              </div>
-                              {variantFoundProduct.variant_group_id && variantFoundProduct.variant_group_id !== editing.variant_group_id && (
-                                <div className="text-xs text-amber-700 mt-1">
-                                  Este producto ya está en otro grupo. Si lo relacionas, se moverá a este grupo.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={attachFoundVariantByBarcode}
-                            disabled={saving || variantActionId === variantFoundProduct.id}
-                            className="px-3 py-1.5 rounded-md border border-purple-300 text-purple-800 text-sm hover:bg-purple-50 disabled:opacity-50"
-                          >
-                            Relacionar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {!editing.variant_group_id && (
-                      <button
-                        type="button"
-                        onClick={handleCreateVariantGroup}
-                        disabled={saving}
-                        className="mt-3 px-3 py-2 rounded-md border border-purple-300 bg-white text-purple-800 text-sm hover:bg-purple-50 disabled:opacity-50"
-                      >
-                        Crear grupo solo con este producto
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="mt-3 text-xs text-gray-600">
-                    Grupo ID: <span className="font-mono">{editing.variant_group_id || "Todavía no creado"}</span>
-                  </div>
-
-                  {editing.variant_group_id && (
-                    <div className="mt-4 rounded-md border border-purple-100 bg-white p-3">
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <div>
-                          <div className="text-sm font-semibold text-gray-800">Productos relacionados</div>
-                          <div className="text-xs text-gray-500">
-                            Aquí solo editas sabor, tamaño y orden. Cada producto mantiene su foto, descripción, precio, stock y barcode.
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => loadVariantGroupProducts(editing.variant_group_id)}
-                          disabled={variantGroupLoading}
-                          className="px-3 py-1.5 rounded-md border border-gray-300 text-xs hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          {variantGroupLoading ? "Recargando…" : "Recargar"}
-                        </button>
-                      </div>
-
-                      {variantGroupLoading ? (
-                        <div className="text-sm text-gray-600">Cargando variantes…</div>
-                      ) : variantGroupProducts.length === 0 ? (
-                        <div className="text-sm text-gray-500">Este grupo todavía no tiene productos.</div>
-                      ) : (
-                        <div className="overflow-auto">
-                          <table className="min-w-[850px] w-full text-sm">
-                            <thead className="bg-gray-50 text-gray-700">
-                              <tr>
-                                <th className="text-left px-3 py-2">Producto</th>
-                                <th className="text-left px-3 py-2">Sabor</th>
-                                <th className="text-left px-3 py-2">Tamaño</th>
-                                <th className="text-left px-3 py-2">Orden</th>
-                                <th className="text-left px-3 py-2">Stock</th>
-                                <th className="text-right px-3 py-2">Acciones</th>
-                              </tr>
-                            </thead>
-
-                            <tbody className="divide-y divide-gray-200">
-                              {variantGroupProducts.map((p) => (
-                                <tr key={p.id} className={p.variant_is_primary ? "bg-green-50" : ""}>
-                                  <td className="px-3 py-2">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <img
-                                        src={p.img && p.img.trim() !== "" ? p.img : "https://placehold.co/48x48?text=IMG"}
-                                        alt={p.name}
-                                        className="h-10 w-10 rounded-md object-cover border"
-                                      />
-                                      <div className="min-w-0">
-                                        <div className="font-semibold text-gray-900 truncate">#{p.id} · {p.name}</div>
-                                        <div className="text-xs text-gray-500">
-                                          Barcode: <span className="font-mono">{p.barcode || "—"}</span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </td>
-
-                                  <td className="px-3 py-2">
-                                    <input
-                                      defaultValue={p.flavor ?? ""}
-                                      onBlur={(e) => updateVariantProduct(p, { flavor: e.target.value })}
-                                      className="w-full rounded-md border border-gray-300 px-2 py-1.5"
-                                      placeholder="Chocolate"
-                                    />
-                                  </td>
-
-                                  <td className="px-3 py-2">
-                                    <input
-                                      defaultValue={p.size ?? ""}
-                                      onBlur={(e) => updateVariantProduct(p, { size: e.target.value })}
-                                      className="w-full rounded-md border border-gray-300 px-2 py-1.5"
-                                      placeholder="1kg"
-                                    />
-                                  </td>
-
-                                  <td className="px-3 py-2 w-[90px]">
-                                    <input
-                                      type="number"
-                                      inputMode="numeric"
-                                      defaultValue={p.variant_sort ?? 0}
-                                      onBlur={(e) => updateVariantProduct(p, { variant_sort: Number(e.target.value) })}
-                                      className="w-full rounded-md border border-gray-300 px-2 py-1.5"
-                                    />
-                                  </td>
-
-                                  <td className="px-3 py-2">{p.stock}</td>
-
-                                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                                    {p.variant_is_primary ? (
-                                      <span className="px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs">Principal</span>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPrimaryVariant(p)}
-                                        disabled={saving || variantActionId === p.id}
-                                        className="px-2 py-1 rounded-md border border-green-300 text-green-700 text-xs hover:bg-green-50 disabled:opacity-50"
-                                      >
-                                        Principal
-                                      </button>
-                                    )}
-
-                                    <button
-                                      type="button"
-                                      onClick={() => removeProductFromVariantGroup(p)}
-                                      disabled={saving || variantActionId === p.id}
-                                      className="ml-2 px-2 py-1 rounded-md border border-red-300 text-red-700 text-xs hover:bg-red-50 disabled:opacity-50"
-                                    >
-                                      Quitar
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4">
-                  <div className="text-sm font-semibold text-gray-800 mb-3">Datos Firesoft / solo lectura</div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <label className="text-sm">
-                      <span className="text-gray-700">Código de barras</span>
-                      <input className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700" value={editing.barcode ?? ""} readOnly />
-                    </label>
-
-                    <label className="text-sm">
-                      <span className="text-gray-700">Código Firesoft</span>
-                      <input className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700" value={editing.firesoft_codigo ?? ""} readOnly />
-                    </label>
-
-                    <label className="text-sm">
-                      <span className="text-gray-700">Referencia Firesoft</span>
-                      <input className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700" value={editing.firesoft_referencia ?? ""} readOnly />
-                    </label>
-
-                    <label className="text-sm">
-                      <span className="text-gray-700">Última sync</span>
-                      <input className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-700" value={editing.firesoft_last_sync ?? ""} readOnly />
                     </label>
                   </div>
                 </div>
@@ -2263,132 +1506,18 @@ export default function AdminProductsManager() {
               </div>
 
               <div className="mt-4 rounded-lg border border-gray-200 p-4">
-                <div className="text-sm font-semibold text-gray-800 mb-3">Precio de venta y margen</div>
+                <div className="text-sm font-semibold text-gray-800 mb-3">Precio (descuento %)</div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <div className="text-sm">
-                    <div className="text-gray-600 text-xs mb-1">Precio venta / PVP</div>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2"
-                      value={editing.price ?? ""}
-                      placeholder="Ej: 3.50"
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? 0 : Number(e.target.value);
-                        onEditChange({ price: v });
-                      }}
-                    />
-                    <div className="mt-1 text-xs text-gray-500">Este es el precio real que verá el cliente en la web.</div>
-                  </div>
-
-                  <div className="text-sm">
-                    <div className="text-gray-600 text-xs mb-1">Precio coste proveedor sin IVA</div>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2"
-                      value={editing.purchase_price ?? ""}
-                      placeholder="Ej: 2.10"
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? null : Number(e.target.value);
-                        onEditChange({ purchase_price: v });
-                      }}
-                    />
-                    <div className="mt-1 text-xs text-gray-500">Coste de compra. Se guarda en purchase_price.</div>
-                  </div>
-
-                  <div className="text-sm">
-                    <div className="text-gray-600 text-xs mb-1">IVA + Recargo</div>
-                    <select
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 bg-white"
-                      value={editTaxKey}
-                      onChange={(e) => {
-                        const key = e.target.value;
-                        setEditTaxKey(key);
-
-                        if (key !== "custom") {
-                          const tax = applyTaxFromKey(key);
-                          onEditChange({ vat_rate: tax.vat_rate, recargo_rate: tax.recargo_rate });
-                        }
-                      }}
-                    >
-                      {TAX_OPTIONS.map((o) => (
-                        <option key={o.key} value={o.key}>
-                          {o.label}
-                        </option>
-                      ))}
-                      <option value="custom">Personalizado</option>
-                    </select>
-
-                    {editTaxKey === "custom" ? (
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          className="w-full rounded-md border border-gray-300 px-3 py-2"
-                          value={editing.vat_rate ?? 0}
-                          onChange={(e) => onEditChange({ vat_rate: Number(e.target.value) })}
-                          placeholder="IVA %"
-                        />
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          className="w-full rounded-md border border-gray-300 px-3 py-2"
-                          value={editing.recargo_rate ?? 0}
-                          onChange={(e) => onEditChange({ recargo_rate: Number(e.target.value) })}
-                          placeholder="Recargo %"
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="mt-4 rounded-md bg-gray-50 border border-gray-200 p-3 text-sm text-gray-700">
-                  {(() => {
-                    const factor = 1 + (Number(editing.vat_rate ?? 0) + Number(editing.recargo_rate ?? 0)) / 100;
-                    const costeSinIva = editing.purchase_price === null ? null : Number(editing.purchase_price);
-                    const costeConImpuestos = costeSinIva === null ? null : round2(costeSinIva * factor);
-                    const margenUd = costeConImpuestos === null ? null : round2(Number(editing.price ?? 0) - costeConImpuestos);
-                    const margenPct =
-                      margenUd === null || Number(editing.price ?? 0) <= 0
-                        ? null
-                        : round2((margenUd / Number(editing.price ?? 0)) * 100);
-
-                    return (
-                      <>
-                        <div>
-                          Coste con IVA + recargo: <b>{costeConImpuestos === null ? "—" : `${costeConImpuestos.toFixed(2)}€`}</b>
-                        </div>
-                        <div>
-                          Margen €/ud: <b>{margenUd === null ? "—" : `${margenUd.toFixed(2)}€`}</b>
-                        </div>
-                        <div>
-                          Margen %: <b>{margenPct === null ? "—" : `${margenPct.toFixed(2)}%`}</b>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-lg border border-gray-200 p-4">
-                <div className="text-sm font-semibold text-gray-800 mb-3">Descuento por porcentaje</div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  <div className="text-sm">
-                    <div className="text-gray-600 text-xs mb-1">Precio anterior tachado</div>
+                    <div className="text-gray-600 text-xs mb-1">Precio base (tachado)</div>
                     <input
                       type="number"
                       inputMode="decimal"
                       step="0.01"
                       className="w-full rounded-md border border-gray-300 px-3 py-2"
                       value={editing.old_price ?? ""}
-                      placeholder="Ej: 4.00"
+                      placeholder="Base"
                       disabled={editing.promo_active && (editing.promo_type === "2x1" || editing.promo_type === "3x2" || editing.promo_type === "second_half")}
                       onChange={(e) => {
                         const v = e.target.value === "" ? null : Number(e.target.value);
@@ -2420,7 +1549,7 @@ export default function AdminProductsManager() {
                   </div>
 
                   <div className="text-sm">
-                    <div className="text-gray-600 text-xs mb-1">Precio final calculado</div>
+                    <div className="text-gray-600 text-xs mb-1">Precio final (auto)</div>
                     <input
                       type="text"
                       readOnly
@@ -2431,7 +1560,7 @@ export default function AdminProductsManager() {
                 </div>
 
                 <div className="mt-2 text-xs text-gray-600">
-                  Si pones descuento, se recalcula el PVP final y se guarda en <b>price</b>. El precio tachado se guarda en <b>old_price</b>.
+                  Se guardará: <b>price</b> = precio final · <b>old_price</b> = base (solo si hay descuento %) · <b>promo_type</b> = percent
                 </div>
               </div>
 
@@ -2491,6 +1620,71 @@ export default function AdminProductsManager() {
                 </div>
 
                 <div className="mt-2 text-xs text-gray-600">Nota: si activas 2x1/3x2/2ª mitad, se desactiva el descuento % (y old_price se pone a null).</div>
+              </div>
+
+              <div className="mt-4 rounded-lg border border-gray-200 p-4">
+                <div className="text-sm font-semibold text-gray-800 mb-3">Coste e impuestos</div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <label className="text-sm">
+                    <span className="text-gray-700">Precio coste (sin IVA)</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
+                      value={editing.purchase_price ?? ""}
+                      onChange={(e) => onEditChange({ purchase_price: e.target.value === "" ? null : Number(e.target.value) })}
+                    />
+                  </label>
+
+                  <label className="text-sm">
+                    <span className="text-gray-700">IVA + Recargo</span>
+                    <select
+                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 bg-white"
+                      value={editTaxKey}
+                      onChange={(e) => {
+                        const key = e.target.value;
+                        setEditTaxKey(key);
+
+                        if (key !== "custom") {
+                          const tax = applyTaxFromKey(key);
+                          onEditChange({ vat_rate: tax.vat_rate, recargo_rate: tax.recargo_rate });
+                        }
+                      }}
+                    >
+                      {TAX_OPTIONS.map((o) => (
+                        <option key={o.key} value={o.key}>
+                          {o.label}
+                        </option>
+                      ))}
+                      <option value="custom">Personalizado</option>
+                    </select>
+
+                    {editTaxKey === "custom" ? (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          className="w-full rounded-md border border-gray-300 px-3 py-2"
+                          value={editing.vat_rate ?? 0}
+                          onChange={(e) => onEditChange({ vat_rate: Number(e.target.value) })}
+                          placeholder="IVA %"
+                        />
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          className="w-full rounded-md border border-gray-300 px-3 py-2"
+                          value={editing.recargo_rate ?? 0}
+                          onChange={(e) => onEditChange({ recargo_rate: Number(e.target.value) })}
+                          placeholder="Recargo %"
+                        />
+                      </div>
+                    ) : null}
+                  </label>
+                </div>
               </div>
 
               <div className="mt-4 rounded-lg border border-gray-200 p-4">
@@ -2669,7 +1863,7 @@ export default function AdminProductsManager() {
                   disabled={saving || imagesSaving || extraInfoLoading}
                   className="px-4 py-2 rounded-md bg-black text-white hover:bg-gray-900 disabled:opacity-50"
                 >
-                  {saving || imagesSaving ? "Guardando…" : "Guardar cambios"}
+                  {saving || imagesSaving ? "Guardando…" : "Guardar y marcar revisado"}
                 </button>
               </div>
             </div>

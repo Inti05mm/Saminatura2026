@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { useUser } from "../containers/useUser";
+import { useCart } from "../containers/CartContext";
 
 type Toast = { type: "success" | "error"; msg: string } | null;
 
@@ -17,6 +18,16 @@ type ProductSuggestion = {
   slug: string | null;
   flavor: string | null;
   size: string | null;
+};
+
+type SearchCatalogRow = {
+  id: number;
+  name: string;
+  slug: string | null;
+  flavor: string | null;
+  size: string | null;
+  category: string | null;
+  brand: string | null;
 };
 
 type SuggestItem =
@@ -39,10 +50,55 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
   const location = useLocation();
 
   const { user, initializing } = useUser();
+  const { cart, loading: cartLoading } = useCart();
+
+  const cartItemCount = cart.items.reduce((total, item) => total + item.qty, 0);
+  const [cartBouncing, setCartBouncing] = useState(false);
+  const previousCartCountRef = useRef(0);
+  const cartCountInitializedRef = useRef(false);
+  const cartBounceTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (cartLoading) return;
+
+    if (!cartCountInitializedRef.current) {
+      previousCartCountRef.current = cartItemCount;
+      cartCountInitializedRef.current = true;
+      return;
+    }
+
+    if (cartItemCount > previousCartCountRef.current) {
+      setCartBouncing(false);
+
+      window.requestAnimationFrame(() => {
+        setCartBouncing(true);
+      });
+
+      if (cartBounceTimerRef.current) {
+        window.clearTimeout(cartBounceTimerRef.current);
+      }
+
+      cartBounceTimerRef.current = window.setTimeout(() => {
+        setCartBouncing(false);
+        cartBounceTimerRef.current = null;
+      }, 650);
+    }
+
+    previousCartCountRef.current = cartItemCount;
+  }, [cartItemCount, cartLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (cartBounceTimerRef.current) {
+        window.clearTimeout(cartBounceTimerRef.current);
+      }
+    };
+  }, []);
 
   const userBtnRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const searchWrapRef = useRef<HTMLFormElement | null>(null);
+  const searchCatalogRef = useRef<SearchCatalogRow[] | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -102,6 +158,13 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
 
   const uniq = (arr: string[]) => Array.from(new Set(arr.map((s) => s.trim()).filter(Boolean)));
 
+  const normalizeText = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("es")
+      .trim();
+
   function fullProductName(p: { name: string; flavor: string | null; size: string | null }) {
     const base = (p.name ?? "").trim();
     const f = (p.flavor ?? "").trim();
@@ -138,13 +201,13 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
     const q = searchQuery.trim();
     if (!q) return;
 
-    const qLower = q.toLowerCase();
+    const qLower = normalizeText(q);
 
     const exactCategory = items.find(
-      (it) => it.kind === "category" && it.value.trim().toLowerCase() === qLower
+      (it) => it.kind === "category" && normalizeText(it.value) === qLower
     ) as { kind: "category"; value: string } | undefined;
 
-    const exactBrand = items.find((it) => it.kind === "brand" && it.value.trim().toLowerCase() === qLower) as
+    const exactBrand = items.find((it) => it.kind === "brand" && normalizeText(it.value) === qLower) as
       | { kind: "brand"; value: string }
       | undefined;
 
@@ -158,11 +221,11 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
     }
 
     const softCategory = items.find(
-      (it) => it.kind === "category" && it.value.trim().toLowerCase().includes(qLower)
+      (it) => it.kind === "category" && normalizeText(it.value).includes(qLower)
     ) as { kind: "category"; value: string } | undefined;
 
     const softBrand = items.find(
-      (it) => it.kind === "brand" && it.value.trim().toLowerCase().includes(qLower)
+      (it) => it.kind === "brand" && normalizeText(it.value).includes(qLower)
     ) as { kind: "brand"; value: string } | undefined;
 
     if (softCategory) {
@@ -196,54 +259,94 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
 
     const t = setTimeout(async () => {
       try {
-        const productsReq = supabase
-          .from("public_products")
-          .select("id,name,slug,flavor,size")
-          .eq("is_active", true)
-          .ilike("name", `%${q}%`)
-          .order("name", { ascending: true })
-          .limit(8);
+        // Se carga el catálogo una sola vez y después se filtra en el navegador.
+        // Así la búsqueda ignora tildes: "cafe" encuentra "café".
+        if (!searchCatalogRef.current) {
+          const { data, error } = await supabase
+            .from("public_products")
+            .select("id,name,slug,flavor,size,category,brand")
+            .order("name", { ascending: true })
+            .range(0, 4999);
 
-        const categoriesReq = supabase
-          .from("public_products")
-          .select("category")
-          .eq("is_active", true)
-          .ilike("category", `%${q}%`)
-          .limit(24);
+          if (error) {
+            console.error("Search catalog error:", error.message);
+            if (alive) setItems([]);
+            return;
+          }
 
-        // ✅ MEJOR: usar public_products también
-        const brandsReq = supabase
-          .from("public_products")
-          .select("brand")
-          .eq("is_active", true)
-          .ilike("brand", `%${q}%`)
-          .limit(24);
-
-        const [{ data: pData, error: pErr }, { data: cData, error: cErr }, { data: bData, error: bErr }] =
-          await Promise.all([productsReq, categoriesReq, brandsReq]);
+          searchCatalogRef.current = (data ?? [])
+            .filter((r: any) => r?.id != null && r?.name)
+            .map((r: any) => ({
+              id: Number(r.id),
+              name: String(r.name),
+              slug: r.slug != null ? String(r.slug) : null,
+              flavor: r.flavor != null ? String(r.flavor) : null,
+              size: r.size != null ? String(r.size) : null,
+              category: r.category != null ? String(r.category) : null,
+              brand: r.brand != null ? String(r.brand) : null,
+            }));
+        }
 
         if (!alive) return;
 
-        if (pErr) console.error("Search products error:", pErr.message);
-        if (cErr) console.error("Search categories error:", cErr.message);
-        if (bErr) console.error("Search brands error:", bErr.message);
+        const normalizedQuery = normalizeText(q);
+        const catalog = searchCatalogRef.current ?? [];
 
-        const categories = uniq((cData ?? []).map((r: any) => String(r?.category ?? ""))).slice(0, 6);
-        const brands = uniq((bData ?? []).map((r: any) => String(r?.brand ?? ""))).slice(0, 6);
+        const matchingRows = catalog.filter((row) => {
+          const searchableProductName = fullProductName({
+            name: row.name,
+            flavor: row.flavor,
+            size: row.size,
+          });
 
-        const products: SuggestItem[] = (pData ?? [])
-          .filter((r: any) => r?.id != null && r?.name)
-          .map((r: any) => ({
+          return (
+            normalizeText(searchableProductName).includes(normalizedQuery) ||
+            normalizeText(row.category ?? "").includes(normalizedQuery) ||
+            normalizeText(row.brand ?? "").includes(normalizedQuery)
+          );
+        });
+
+        const categories = uniq(
+          matchingRows
+            .map((row) => row.category ?? "")
+            .filter((value) => normalizeText(value).includes(normalizedQuery))
+        ).slice(0, 6);
+
+        const brands = uniq(
+          matchingRows
+            .map((row) => row.brand ?? "")
+            .filter((value) => normalizeText(value).includes(normalizedQuery))
+        ).slice(0, 6);
+
+        const products: SuggestItem[] = matchingRows
+          .filter((row) =>
+            normalizeText(
+              fullProductName({
+                name: row.name,
+                flavor: row.flavor,
+                size: row.size,
+              })
+            ).includes(normalizedQuery)
+          )
+          .slice(0, 8)
+          .map((row) => ({
             kind: "product",
-            id: Number(r.id),
-            name: String(r.name),
-            slug: r.slug != null ? String(r.slug) : null,
-            flavor: r.flavor != null ? String(r.flavor) : null,
-            size: r.size != null ? String(r.size) : null,
+            id: row.id,
+            name: row.name,
+            slug: row.slug,
+            flavor: row.flavor,
+            size: row.size,
           }));
 
-        const catItems: SuggestItem[] = categories.map((v) => ({ kind: "category", value: v }));
-        const brandItems: SuggestItem[] = brands.map((v) => ({ kind: "brand", value: v }));
+        const catItems: SuggestItem[] = categories.map((value) => ({
+          kind: "category",
+          value,
+        }));
+
+        const brandItems: SuggestItem[] = brands.map((value) => ({
+          kind: "brand",
+          value,
+        }));
 
         setItems([...catItems, ...brandItems, ...products]);
       } finally {
@@ -307,6 +410,30 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
 
   return (
     <>
+      <style>{`
+        @keyframes cartBump {
+          0% {
+            transform: translateY(0) scale(1);
+          }
+          25% {
+            transform: translateY(-7px) scale(1.08);
+          }
+          50% {
+            transform: translateY(0) scale(0.97);
+          }
+          75% {
+            transform: translateY(-3px) scale(1.04);
+          }
+          100% {
+            transform: translateY(0) scale(1);
+          }
+        }
+
+        .cart-bump {
+          animation: cartBump 650ms ease-in-out;
+        }
+      `}</style>
+
       {toast && (
         <div className="fixed top-4 right-4 z-[9999]">
           <div
@@ -475,7 +602,11 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
             Nosotros
           </Link>
 
-          <Link to="/micesta" className="inline-flex items-center">
+          <Link
+            to="/micesta"
+            className={`relative inline-flex items-center ${cartBouncing ? "cart-bump" : ""}`}
+            aria-label={`Mi cesta${cartItemCount > 0 ? `, ${cartItemCount} productos` : ""}`}
+          >
             <button
               type="button"
               aria-label="Mi cesta"
@@ -506,6 +637,23 @@ const Header: React.FC<{ title?: string }> = ({ title = "Saminatura" }) => {
                 />
               </svg>
             </button>
+
+            {cartItemCount > 0 && (
+              <span
+                className="
+                  absolute -right-1 -top-1
+                  min-w-[20px] h-5 px-1.5
+                  rounded-full
+                  bg-[#00bf63] text-white
+                  text-[11px] font-bold leading-none
+                  flex items-center justify-center
+                  shadow-md
+                  pointer-events-none
+                "
+              >
+                {cartItemCount > 99 ? "99+" : cartItemCount}
+              </span>
+            )}
           </Link>
 
           <div className="relative inline-flex">

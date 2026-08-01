@@ -746,8 +746,8 @@ export default function CartPage() {
 
   const StepBar = () => {
     const steps: { key: CheckoutStep; label: string }[] = [
-      { key: "info", label: "Información" },
       { key: "cart", label: "Carrito" },
+      { key: "info", label: "Información" },
       { key: "shipping", label: "Envío" },
       { key: "review", label: "Pago" },
     ];
