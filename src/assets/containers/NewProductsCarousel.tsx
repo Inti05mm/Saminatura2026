@@ -7,7 +7,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 
-type NewProduct = {
+type BestSellingProduct = {
   id: number;
   slug: string | null;
   name: string;
@@ -15,7 +15,7 @@ type NewProduct = {
   price: number;
   img: string | null;
   stock: number | null;
-  published_at: string;
+  sold_count: number;
 };
 
 const formatEUR = (value: number) =>
@@ -24,47 +24,12 @@ const formatEUR = (value: number) =>
     currency: "EUR",
   }).format(value);
 
-const formatPublishedDate = (dateValue: string) => {
-  const publishedDate = new Date(dateValue);
-  const now = new Date();
-
-  const differenceMilliseconds =
-    now.getTime() - publishedDate.getTime();
-
-  const differenceDays = Math.max(
-    0,
-    Math.floor(differenceMilliseconds / 86_400_000)
-  );
-
-  if (differenceDays === 0) {
-    return "Nuevo hoy";
-  }
-
-  if (differenceDays === 1) {
-    return "Añadido ayer";
-  }
-
-  if (differenceDays < 7) {
-    return `Hace ${differenceDays} días`;
-  }
-
-  if (differenceDays < 30) {
-    const weeks = Math.floor(differenceDays / 7);
-
-    return weeks === 1
-      ? "Hace 1 semana"
-      : `Hace ${weeks} semanas`;
-  }
-
-  return "Novedad";
-};
-
 const NewProductsCarousel: React.FC = () => {
   const navigate = useNavigate();
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
 
-  const [products, setProducts] = useState<NewProduct[]>([]);
+  const [products, setProducts] = useState<BestSellingProduct[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -120,13 +85,13 @@ const NewProductsCarousel: React.FC = () => {
   }, []);
 
   // ============================================================
-  // CARGAR NOVEDADES
+  // CARGAR PRODUCTOS MÁS VENDIDOS
   // ============================================================
 
   useEffect(() => {
     let alive = true;
 
-    const loadNewProducts = async () => {
+    const loadBestSellingProducts = async () => {
       setLoading(true);
 
       try {
@@ -141,12 +106,11 @@ const NewProductsCarousel: React.FC = () => {
               price,
               img,
               stock,
-              published_at
+              sold_count
             `
           )
-          .not("published_at", "is", null)
           .gt("stock", 0)
-          .order("published_at", {
+          .order("sold_count", {
             ascending: false,
           })
           .limit(12);
@@ -157,7 +121,7 @@ const NewProductsCarousel: React.FC = () => {
           throw error;
         }
 
-        const normalizedProducts: NewProduct[] = (
+        const normalizedProducts: BestSellingProduct[] = (
           data ?? []
         ).map((product: any) => ({
           id: Number(product.id),
@@ -186,7 +150,7 @@ const NewProductsCarousel: React.FC = () => {
               ? null
               : Number(product.stock),
 
-          published_at: String(product.published_at),
+          sold_count: Number(product.sold_count ?? 0),
         }));
 
         setProducts(normalizedProducts);
@@ -194,7 +158,7 @@ const NewProductsCarousel: React.FC = () => {
         if (!alive) return;
 
         console.error(
-          "Error cargando las novedades:",
+          "Error cargando los productos más vendidos:",
           error
         );
 
@@ -206,7 +170,7 @@ const NewProductsCarousel: React.FC = () => {
       }
     };
 
-    void loadNewProducts();
+    void loadBestSellingProducts();
 
     return () => {
       alive = false;
@@ -276,7 +240,7 @@ const NewProductsCarousel: React.FC = () => {
     );
   };
 
-  const openProduct = (product: NewProduct) => {
+  const openProduct = (product: BestSellingProduct) => {
     const slug = (product.slug ?? "").trim();
 
     if (slug) {
@@ -291,7 +255,7 @@ const NewProductsCarousel: React.FC = () => {
     <section className="w-full overflow-hidden bg-[#f7f5ef]">
       {/* =======================================================
           ONDA SUPERIOR
-          Conecta el verde de Más vendidos con el beige
+          Mantiene exactamente los mismos colores y formas
       ======================================================= */}
 
       <svg
@@ -333,28 +297,27 @@ const NewProductsCarousel: React.FC = () => {
       </svg>
 
       {/* =======================================================
-          CONTENIDO DE NOVEDADES
+          CONTENIDO DE PRODUCTOS MÁS VENDIDOS
       ======================================================= */}
 
       <div className="container mx-auto px-4 pb-16 pt-8 sm:px-6 md:pt-10">
         <div className="mb-9 text-center">
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.3em] text-[#75815d]">
-            Recién llegados
+            Los favoritos de nuestros clientes
           </p>
 
           <h2 className="roboto-title text-2xl text-[#25331c] md:text-3xl">
-            Descubre nuestras novedades
+            Nuestros productos más vendidos
           </h2>
         </div>
 
         {loading ? (
           <p className="text-center text-[#5f694f]">
-            Cargando novedades…
+            Cargando productos más vendidos…
           </p>
         ) : products.length === 0 ? (
           <p className="text-center text-[#5f694f]">
-            Próximamente encontrarás aquí nuestros
-            productos más recientes.
+            Aún no hay productos vendidos para mostrar.
           </p>
         ) : (
           <div className="relative">
@@ -423,23 +386,7 @@ const NewProductsCarousel: React.FC = () => {
                           hover:shadow-xl
                         "
                       >
-                        {/* Etiqueta de novedad */}
-                        <span
-                          className="
-                            absolute left-3 top-3 z-10
-                            rounded-full bg-[#425530]
-                            px-3 py-1
-                            text-[10px] font-semibold
-                            uppercase tracking-[0.12em]
-                            text-white shadow-sm
-                            transition duration-300
-                            group-hover:scale-105
-                          "
-                        >
-                          {formatPublishedDate(
-                            product.published_at
-                          )}
-                        </span>
+                        
 
                         {/* Imagen */}
                         <div className="flex h-48 items-center justify-center bg-white p-4 pt-10 sm:h-52 lg:h-56">
@@ -558,7 +505,7 @@ const NewProductsCarousel: React.FC = () => {
 
       {/* =======================================================
           ONDA INFERIOR
-          Conecta el beige con Visita nuestra tienda
+          Mantiene exactamente los mismos colores y formas
       ======================================================= */}
 
       <svg

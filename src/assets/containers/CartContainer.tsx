@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { useCart } from "../containers/CartContext";
 import { UserContext } from "../containers/UserContext";
+import { Heart } from "lucide-react";
+import { useFavorites } from "../containers/FavoritesContext";
+import GuestFavoriteModal from "../containers/GuestFavoriteModal";
 
 type Product = {
   id: number;
@@ -123,6 +126,7 @@ export default function CartPage() {
   const navigate = useNavigate();
   const { user, initializing } = useContext(UserContext) as any;
   const { cart, setQty, removeFromCart, loading: cartLoading } = useCart();
+  const { addFavorite, isFavorite } = useFavorites();
 
   // ✅ Cache por ID para NO “recargar todo” al borrar / cambiar qty
   const [productById, setProductById] = useState<Record<number, Product>>({});
@@ -158,6 +162,21 @@ export default function CartPage() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
+
+  const [
+    productToMove,
+    setProductToMove,
+  ] = useState<Product | null>(null);
+
+  const [
+    movingToFavorites,
+    setMovingToFavorites,
+  ] = useState(false);
+
+  const [
+    guestMoveProduct,
+    setGuestMoveProduct,
+  ] = useState<Product | null>(null);
 
   // ✅ mensaje "no quedan más" por producto
   const [stockMsgById, setStockMsgById] = useState<Record<number, string>>({});
@@ -526,6 +545,63 @@ export default function CartPage() {
   const openProduct = (p: Product) => {
     const s = (p.slug ?? "").trim();
     navigate(`/shopping/${s ? `${s}-${p.id}` : p.id}`);
+  };
+
+  const closeMoveToFavorites = () => {
+    if (movingToFavorites) return;
+    setProductToMove(null);
+  };
+
+  const finishMoveToFavorites = async (
+    product: Product
+  ) => {
+    if (movingToFavorites) return;
+
+    setMovingToFavorites(true);
+
+    try {
+      if (!isFavorite(product.id)) {
+        await addFavorite(product.id);
+      }
+
+      await removeFromCart(product.id);
+
+      setProductToMove(null);
+      setGuestMoveProduct(null);
+    } catch (error) {
+      console.error(
+        "Error moviendo el producto a favoritos:",
+        error
+      );
+    } finally {
+      setMovingToFavorites(false);
+    }
+  };
+
+  const confirmMoveToFavorites = async () => {
+    if (
+      !productToMove ||
+      movingToFavorites
+    ) {
+      return;
+    }
+
+    const {
+      data: { session },
+    } =
+      await supabase.auth.getSession();
+
+    if (!session?.user) {
+      setGuestMoveProduct(
+        productToMove
+      );
+      setProductToMove(null);
+      return;
+    }
+
+    await finishMoveToFavorites(
+      productToMove
+    );
   };
 
   const saveDraftOrder = async () => {
@@ -933,35 +1009,68 @@ export default function CartPage() {
                           <td className="px-2 py-2">{formatEUR(rowSubtotal)}</td>
 
                           <td className="px-2 py-2">
-                            <button
-                              type="button"
-                              onClick={() => removeFromCart(p.id)}
-                              disabled={cartLoading}
-                              className="cursor-pointer"
-                              aria-label="Remove product"
-                            >
-                              <svg width="24" height="25" viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path
-                                  d="M12 23.5C18.0748 23.5 23 18.5748 23 12.5C23 6.42525 18.0748 1.5 12 1.5C5.92525 1.5 1 6.42525 1 12.5C1 18.5748 5.92525 23.5 12 23.5Z"
-                                  stroke="#CCCCCC"
-                                  strokeMiterlimit="10"
+                            <div className="flex items-center justify-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setProductToMove(p)
+                                }
+                                disabled={
+                                  cartLoading ||
+                                  movingToFavorites
+                                }
+                                className="cursor-pointer text-[#8c3342] transition hover:scale-110 hover:text-[#762a37] disabled:cursor-wait disabled:opacity-50"
+                                aria-label={`Mover ${nameFull} a favoritos`}
+                                title="Mover a favoritos"
+                              >
+                                <Heart
+                                  className={[
+                                    "h-6 w-6",
+                                    isFavorite(p.id)
+                                      ? "fill-current"
+                                      : "",
+                                  ].join(" ")}
                                 />
-                                <path
-                                  d="M16 8.5L8 16.5"
-                                  stroke="#666666"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                                <path
-                                  d="M16 16.5L8 8.5"
-                                  stroke="#666666"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removeFromCart(
+                                    p.id
+                                  )
+                                }
+                                disabled={
+                                  cartLoading ||
+                                  movingToFavorites
+                                }
+                                className="cursor-pointer"
+                                aria-label="Eliminar producto"
+                                title="Eliminar de la cesta"
+                              >
+                                <svg width="24" height="25" viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                  <path
+                                    d="M12 23.5C18.0748 23.5 23 18.5748 23 12.5C23 6.42525 18.0748 1.5 12 1.5C5.92525 1.5 1 6.42525 1 12.5C1 18.5748 5.92525 23.5 12 23.5Z"
+                                    stroke="#CCCCCC"
+                                    strokeMiterlimit="10"
+                                  />
+                                  <path
+                                    d="M16 8.5L8 16.5"
+                                    stroke="#666666"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M16 16.5L8 8.5"
+                                    stroke="#666666"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1403,6 +1512,125 @@ export default function CartPage() {
           </p>
         </div>
       </div>
+
+      {productToMove && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/35 px-4 backdrop-blur-[2px]"
+          onClick={closeMoveToFavorites}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="move-favorite-title"
+            aria-describedby="move-favorite-description"
+            className="w-full max-w-sm rounded-3xl border border-[#ead6d9] bg-white p-6 shadow-2xl"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#fff1f3] text-[#8c3342]">
+              <Heart className="h-6 w-6" />
+            </div>
+
+            <h2
+              id="move-favorite-title"
+              className="mt-4 text-center text-xl font-semibold text-gray-950"
+            >
+              ¿Mover a favoritos?
+            </h2>
+
+            <p
+              id="move-favorite-description"
+              className="mt-2 text-center text-sm leading-6 text-gray-600"
+            >
+              Guardaremos
+              <span className="font-semibold text-gray-900">
+                {" "}
+                {fullProductName(
+                  productToMove
+                )}
+              </span>{" "}
+              en tu lista de favoritos y lo eliminaremos de la cesta.
+            </p>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={
+                  closeMoveToFavorites
+                }
+                disabled={
+                  movingToFavorites
+                }
+                className="flex-1 rounded-full border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmMoveToFavorites();
+                }}
+                disabled={
+                  movingToFavorites
+                }
+                className="flex-1 rounded-full bg-[#8c3342] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#762a37] disabled:cursor-wait disabled:opacity-70"
+              >
+                {movingToFavorites
+                  ? "Moviendo…"
+                  : "Sí, mover"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <GuestFavoriteModal
+        open={Boolean(
+          guestMoveProduct
+        )}
+        productName={
+          guestMoveProduct
+            ? fullProductName(
+                guestMoveProduct
+              )
+            : undefined
+        }
+        processing={
+          movingToFavorites
+        }
+        onClose={() => {
+          if (!movingToFavorites) {
+            setGuestMoveProduct(
+              null
+            );
+          }
+        }}
+        onContinueAsGuest={async () => {
+          if (guestMoveProduct) {
+            await finishMoveToFavorites(
+              guestMoveProduct
+            );
+          }
+        }}
+        onLogin={() => {
+          const returnTo =
+            window.location.pathname +
+            window.location.search;
+
+          setGuestMoveProduct(null);
+
+          navigate("/usuario", {
+            state: {
+              message:
+                "Inicia sesión para conservar tus favoritos en tu cuenta.",
+              returnTo,
+            },
+          });
+        }}
+      />
     </section>
   );
 }

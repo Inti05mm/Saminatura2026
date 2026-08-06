@@ -9,7 +9,7 @@ type ProductSlide = {
   brand: string;
   price: number;
   img: string | null;
-  sold_count: number;
+  published_at: string;
   stock: number | null;
 };
 
@@ -36,15 +36,12 @@ const Carousel: React.FC = () => {
   useEffect(() => {
     const updateVisibleSlides = () => {
       if (window.innerWidth < 640) {
-        // Móvil: 1 producto
         setVisibleSlides(1);
         setSlidePercentage(100);
       } else if (window.innerWidth < 1024) {
-        // Tablet: 2 productos
         setVisibleSlides(2);
         setSlidePercentage(50);
       } else {
-        // Ordenador: 4 productos
         setVisibleSlides(4);
         setSlidePercentage(25);
       }
@@ -60,7 +57,7 @@ const Carousel: React.FC = () => {
   }, []);
 
   // ============================================================
-  // CARGAR PRODUCTOS MÁS VENDIDOS
+  // CARGAR NOVEDADES
   // ============================================================
 
   useEffect(() => {
@@ -73,10 +70,11 @@ const Carousel: React.FC = () => {
         const { data, error } = await supabase
           .from("public_products")
           .select(
-            "id, slug, name, brand, price, img, sold_count, stock"
+            "id, slug, name, brand, price, img, published_at, stock"
           )
+          .not("published_at", "is", null)
           .gt("stock", 0)
-          .order("sold_count", { ascending: false })
+          .order("published_at", { ascending: false })
           .limit(12);
 
         if (!alive) return;
@@ -105,7 +103,7 @@ const Carousel: React.FC = () => {
                 ? null
                 : String(product.img),
 
-            sold_count: Number(product.sold_count ?? 0),
+            published_at: String(product.published_at ?? ""),
 
             stock:
               product.stock === null || product.stock === undefined
@@ -118,7 +116,7 @@ const Carousel: React.FC = () => {
       } catch (error) {
         if (!alive) return;
 
-        console.error("Error cargando más vendidos:", error);
+        console.error("Error cargando novedades:", error);
         setSlidesData([]);
       } finally {
         if (alive) {
@@ -143,9 +141,7 @@ const Carousel: React.FC = () => {
   }, [slidesData.length, visibleSlides]);
 
   useEffect(() => {
-    setCurrentSlide((current) =>
-      Math.min(current, maxIndex)
-    );
+    setCurrentSlide((current) => Math.min(current, maxIndex));
   }, [maxIndex]);
 
   // ============================================================
@@ -159,7 +155,7 @@ const Carousel: React.FC = () => {
       setCurrentSlide((previous) =>
         previous >= maxIndex ? 0 : previous + 1
       );
-    }, 3000);
+    }, 4200);
 
     return () => {
       window.clearInterval(interval);
@@ -204,13 +200,56 @@ const Carousel: React.FC = () => {
   };
 
   return (
-<section className="w-full overflow-hidden bg-[#425530]">
-        {/* Separador entre opciones alimentarias y carrusel */}
+    <section className="relative w-full overflow-hidden bg-[#425530]">
+      {/* Decoración orgánica del fondo */}
+      <div
+        className="
+          pointer-events-none
+          absolute -left-24 top-1/3
+          h-72 w-72
+          rounded-full
+          bg-[#81976b]/20
+          blur-3xl
+        "
+      />
+
+      <div
+        className="
+          pointer-events-none
+          absolute -right-20 bottom-10
+          h-80 w-80
+          rounded-full
+          bg-[#b8c8a5]/15
+          blur-3xl
+        "
+      />
+
+      <div
+        className="
+          pointer-events-none
+          absolute left-1/2 top-1/2
+          h-96 w-96
+          -translate-x-1/2 -translate-y-1/2
+          rounded-full
+          bg-white/[0.025]
+          blur-3xl
+        "
+      />
+
+      {/* Separador superior */}
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 1440 490"
         preserveAspectRatio="none"
-        className="-mb-[1px] block h-28 w-full bg-[#f7f5ef] sm:h-36 md:h-44 lg:h-52"
+        className="
+          relative z-10
+          -mb-[1px]
+          block h-28 w-full
+          bg-[#f7f5ef]
+          sm:h-36
+          md:h-44
+          lg:h-52
+        "
         aria-hidden="true"
       >
         {/* Onda clara */}
@@ -228,8 +267,8 @@ const Carousel: React.FC = () => {
             L0,500
             Z
           "
-fill="#425530"
-fillOpacity="0.53"
+          fill="#425530"
+          fillOpacity="0.53"
         />
 
         {/* Onda principal */}
@@ -247,40 +286,93 @@ fillOpacity="0.53"
             L0,500
             Z
           "
-fill="#425530"
+          fill="#425530"
         />
       </svg>
 
       {/* Contenido del carrusel */}
-      <div className="container mx-auto px-4 pb-14 pt-8 sm:px-6 md:pb-16 md:pt-10">
-        <h2 className="roboto-title mb-8 text-center text-2xl text-white md:text-3xl">
-          Nuestros productos más vendidos
-        </h2>
+      <div
+        className="
+          container relative z-10
+          mx-auto
+          px-4 pb-14 pt-6
+          sm:px-6
+          md:pb-16 md:pt-8
+        "
+      >
+        {/* Título */}
+        <div className="mb-9 text-center">
+          <span
+            className="
+              text-[10px]
+              font-semibold uppercase
+              tracking-[0.28em]
+              text-[#c9d6bc]
+              sm:text-xs
+            "
+          >
+            Recién llegados
+          </span>
+
+          <h2
+            className="
+              roboto-title
+              mt-3
+              text-2xl text-white
+              sm:text-3xl
+              md:text-4xl
+            "
+          >
+            Descubre nuestras novedades
+          </h2>
+
+          <div
+            className="
+              mx-auto mt-4
+              h-[2px] w-16
+              rounded-full
+              bg-[#a9bb95]
+            "
+          />
+        </div>
 
         {loading ? (
-          <p className="text-center text-white/80">
-            Cargando…
-          </p>
+          <div className="flex min-h-64 items-center justify-center">
+            <p className="text-center text-white/80">
+              Cargando novedades…
+            </p>
+          </div>
         ) : slidesData.length === 0 ? (
-          <p className="text-center text-white/80">
-            Aún no hay productos para mostrar.
-          </p>
+          <div className="flex min-h-64 items-center justify-center">
+            <p className="text-center text-white/80">
+              Próximamente encontrarás aquí nuestros productos más recientes.
+            </p>
+          </div>
         ) : (
           <div className="relative">
-            {/* Marco verde oscuro alrededor del carrusel */}
+            {/* Contenedor exterior translúcido */}
             <div
               className="
-rounded-3xl bg-[#8a9d76]
-                px-4 py-5 shadow-xl
-                sm:px-5
-                md:px-6 md:py-6
+                rounded-[2rem]
+                border border-white/15
+                bg-white/10
+                px-3 py-4
+                shadow-[0_25px_70px_rgba(20,35,12,0.28)]
+                backdrop-blur-sm
+                sm:px-5 sm:py-5
+                md:px-7 md:py-7
               "
             >
               {/* Ventana visible */}
               <div className="relative overflow-hidden rounded-2xl">
                 {/* Fila desplazable */}
                 <div
-                  className="flex transition-transform duration-500 ease-in-out"
+                  className="
+                    flex
+                    transition-transform
+                    duration-700
+                    ease-in-out
+                  "
                   style={{
                     transform: `translateX(-${
                       currentSlide * slidePercentage
@@ -293,7 +385,10 @@ rounded-3xl bg-[#8a9d76]
                       type="button"
                       onClick={() => openProduct(product)}
                       className="
-                        w-full shrink-0 px-2 py-2 text-left
+                        group
+                        w-full shrink-0
+                        px-2 py-2
+                        text-left
                         sm:w-1/2
                         lg:w-1/4
                       "
@@ -301,49 +396,110 @@ rounded-3xl bg-[#8a9d76]
                     >
                       <div
                         className="
-                          flex h-full flex-col overflow-hidden
-                          rounded-xl bg-white shadow-sm
-                          transition duration-300
-                          hover:-translate-y-1
-                          hover:shadow-xl
+                          flex h-full flex-col
+                          overflow-hidden
+                          rounded-2xl
+                          border border-white/70
+                          bg-[#fffefa]
+                          shadow-[0_10px_30px_rgba(34,51,24,0.12)]
+                          transition-all duration-300
+                          hover:-translate-y-2
+                          hover:shadow-[0_20px_45px_rgba(34,51,24,0.22)]
                         "
                       >
                         {/* Imagen */}
-<div className="flex h-48 items-center justify-center bg-white p-3 sm:h-52 lg:h-56">
-  <div
-    className="
-      flex h-full w-full items-center justify-center
-      rounded-lg
-      border border-[#8a9d76]/35
-      bg-white
-      p-2
-    "
-  >
-    <img
-      src={
-        product.img?.trim()
-          ? product.img
-          : "https://via.placeholder.com/600x600?text=Producto"
-      }
-      alt={product.name}
-      className="h-full w-full object-contain"
-      loading="lazy"
-    />
-  </div>
-</div>
+                        <div
+                          className="
+                            relative
+                            flex h-48
+                            items-center justify-center
+                            overflow-hidden
+                            bg-gradient-to-b
+                            from-[#faf9f4]
+                            to-white
+                            p-5
+                            sm:h-52
+                            lg:h-56
+                          "
+                        >
+                          {/* Círculo decorativo */}
+                          <div
+                            className="
+                              absolute
+                              h-36 w-36
+                              rounded-full
+                              bg-[#e8ede2]/70
+                              transition duration-500
+                              group-hover:scale-110
+                              sm:h-40 sm:w-40
+                            "
+                          />
+
+                          <img
+                            src={
+                              product.img?.trim()
+                                ? product.img
+                                : "https://via.placeholder.com/600x600?text=Producto"
+                            }
+                            alt={product.name}
+                            className="
+                              relative z-10
+                              h-full w-full
+                              object-contain
+                              transition-transform
+                              duration-500
+                              group-hover:scale-105
+                            "
+                            loading="lazy"
+                          />
+                        </div>
 
                         {/* Información */}
-                        <div className="flex flex-1 flex-col p-4">
-                          <h3 className="line-clamp-2 min-h-10 text-base font-semibold leading-5 text-gray-900">
+                        <div className="flex flex-1 flex-col p-4 sm:p-5">
+                          {/* Nombre del producto */}
+                          <h3
+                            className="
+                              line-clamp-2
+                              min-h-11
+                              text-base
+                              font-semibold
+                              leading-[1.35]
+                              text-[#1f2819]
+                              transition-colors
+                              group-hover:text-[#425530]
+                              sm:text-[17px]
+                            "
+                          >
                             {product.name}
                           </h3>
 
-                          <div className="mt-1 truncate text-xs text-gray-500">
+                          {/* Marca */}
+                          <p
+                            className="
+                              mt-2
+                              truncate
+                              text-sm
+                              font-normal
+                              text-[#7c8773]
+                            "
+                          >
                             {product.brand || "Sin marca"}
-                          </div>
+                          </p>
 
-                          <div className="mt-auto pt-3 text-base font-semibold text-gray-900">
-                            {formatEUR(product.price)}
+                          {/* Precio */}
+                          <div className="mt-auto pt-4">
+                            <span
+                              className="
+                                block
+                                text-xl
+                                font-bold
+                                leading-none
+                                text-[#354526]
+                                lg:text-2xl
+                              "
+                            >
+                              {formatEUR(product.price)}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -360,21 +516,42 @@ rounded-3xl bg-[#8a9d76]
               disabled={currentSlide === 0}
               className={`
                 absolute left-1 top-1/2 z-20
-                flex h-10 w-10 -translate-y-1/2
-                items-center justify-center rounded-full
-                bg-white text-2xl text-[#425530]
-                shadow-md transition
-                hover:scale-105 hover:bg-[#f7f5ef]
-                md:-left-12
+                flex h-11 w-11
+                -translate-y-1/2
+                items-center justify-center
+                rounded-full
+                border border-white/30
+                bg-[#314122]/90
+                text-white
+                shadow-lg
+                backdrop-blur-sm
+                transition-all duration-300
+                hover:scale-110
+                hover:bg-white
+                hover:text-[#425530]
+                md:-left-5
+                lg:-left-6
                 ${
                   currentSlide === 0
-                    ? "cursor-not-allowed opacity-40"
+                    ? "cursor-not-allowed opacity-35 hover:scale-100 hover:bg-[#314122]/90 hover:text-white"
                     : ""
                 }
               `}
               aria-label="Anterior"
             >
-              ‹
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="block h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="m15 18-6-6 6-6" />
+              </svg>
             </button>
 
             {/* Botón siguiente */}
@@ -384,26 +561,47 @@ rounded-3xl bg-[#8a9d76]
               disabled={currentSlide >= maxIndex}
               className={`
                 absolute right-1 top-1/2 z-20
-                flex h-10 w-10 -translate-y-1/2
-                items-center justify-center rounded-full
-                bg-white text-2xl text-[#425530]
-                shadow-md transition
-                hover:scale-105 hover:bg-[#f7f5ef]
-                md:-right-12
+                flex h-11 w-11
+                -translate-y-1/2
+                items-center justify-center
+                rounded-full
+                border border-white/30
+                bg-[#314122]/90
+                text-white
+                shadow-lg
+                backdrop-blur-sm
+                transition-all duration-300
+                hover:scale-110
+                hover:bg-white
+                hover:text-[#425530]
+                md:-right-5
+                lg:-right-6
                 ${
                   currentSlide >= maxIndex
-                    ? "cursor-not-allowed opacity-40"
+                    ? "cursor-not-allowed opacity-35 hover:scale-100 hover:bg-[#314122]/90 hover:text-white"
                     : ""
                 }
               `}
               aria-label="Siguiente"
             >
-              ›
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="block h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="m9 18 6-6-6-6" />
+              </svg>
             </button>
 
             {/* Indicadores */}
             {maxIndex > 0 && (
-              <div className="mt-6 flex justify-center gap-2">
+              <div className="mt-7 flex justify-center gap-2">
                 {Array.from({
                   length: maxIndex + 1,
                 }).map((_, index) => (
@@ -412,11 +610,13 @@ rounded-3xl bg-[#8a9d76]
                     type="button"
                     onClick={() => goTo(index)}
                     className={`
-                      rounded-full transition-all duration-300
+                      rounded-full
+                      transition-all
+                      duration-300
                       ${
                         currentSlide === index
-                          ? "h-2.5 w-6 bg-white"
-                          : "h-2.5 w-2.5 bg-white/40 hover:bg-white/70"
+                          ? "h-2.5 w-7 bg-white"
+                          : "h-2.5 w-2.5 bg-white/35 hover:bg-white/70"
                       }
                     `}
                     aria-label={`Ir a la posición ${index + 1}`}

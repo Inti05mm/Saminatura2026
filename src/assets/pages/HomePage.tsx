@@ -10,6 +10,7 @@ import Header from "../containers/Header";
 import HeroSaminatura from "../containers/HeroSaminatura.tsx";
 import NewProductsCarousel from "../containers/NewProductsCarousel.tsx"
 import DietaryOptions from "../containers/DietaryOptions.tsx"
+import MarcasInicio from "../containers/MarcasInicio.tsx";
 
 type Toast = { type: "success" | "error"; msg: string } | null;
 
@@ -68,10 +69,12 @@ export default function HomePage() {
 
       <Header />
       <Inicio/>
-      <Categories />  
-      <DietaryOptions/>
-      <Carousel />
       <NewProductsCarousel/>
+      <Categories /> 
+            <MarcasInicio/>
+                  <Carousel />
+      <DietaryOptions/>
+      
       <Mapa />
       <Footer />
       

@@ -107,7 +107,7 @@ const User: React.FC = () => {
       return;
     }
 
-    setToast({ type: "success", msg: "Te envié un correo con el enlace para restablecer la contraseña." });
+    setToast({ type: "success", msg: "Te hemos enviado un correo con el enlace para restablecer la contraseña." });
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
