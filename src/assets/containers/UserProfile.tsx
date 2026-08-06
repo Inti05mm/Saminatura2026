@@ -1,854 +1,1688 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
-import jsPDF from "jspdf";
-import logoUrl from "../pictures/logo_2.png";
+import { useUser } from "./useUser";
+import UserPedidosPanel from "./UserPedidosPanel";
+import {
+  importLibrary,
+  setOptions,
+} from "@googlemaps/js-api-loader";
 
-type OrderItemRow = {
-  id: string;
-  product_id: number;
-  product_name: string;
-  unit_price: number;
-  quantity: number;
+type ProfileSection =
+  | "datos"
+  | "direcciones"
+  | "pedidos"
+  | "seguridad";
+
+type ProfileForm = {
+  first_name: string;
+  last_name: string;
+  phone: string;
 };
 
-type InvoiceRow = {
-  id?: string;
-  invoice_code: string;
-  invoice_date: string;
-  pdf_url: string;
-};
-
-type OrderRow = {
+type AddressRow = {
   id: string;
   user_id: string;
-  status: "pending" | "paid" | "cancelled";
-  total_amount: number;
-  currency: string;
-  created_at: string | null;
-  updated_at: string | null;
-  paid_at: string | null;
-
-  customer_email: string | null;
-  customer_name: string | null;
-  customer_phone: string | null;
-
-  shipping_method: string | null;
-  shipping_amount: number;
-
-  shipping_address: any | null;
-
-  order_items?: OrderItemRow[];
-  invoices?: InvoiceRow[] | null;
+  label: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  company: string | null;
+  address_line1: string;
+  address_line2: string | null;
+  postal_code: string;
+  city: string;
+  region: string | null;
+  country: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
-const COMPANY = {
-  name: "SAMINATURA",
-  subtitle: "Tienda ecológica, nutrición y bienestar",
-  email: "info@saminatura.com",
-  phone: "631 415 075",
-  address: "Calle Teruel 16, Binéfar, Huesca, España",
-  website: "www.saminatura.com",
+type AddressForm = {
+  label: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  company: string;
+  address_line1: string;
+  address_line2: string;
+  postal_code: string;
+  city: string;
+  region: string;
+  country: string;
+  is_default: boolean;
 };
 
-const BRAND_COLOR = {
-  dark: [47, 65, 45] as [number, number, number],
-  green: [112, 171, 55] as [number, number, number],
-  soft: [245, 248, 242] as [number, number, number],
-  border: [220, 226, 215] as [number, number, number],
-  text: [35, 35, 35] as [number, number, number],
-  muted: [105, 105, 105] as [number, number, number],
+type Notice = {
+  type: "success" | "error";
+  message: string;
+} | null;
+
+const emptyAddress: AddressForm = {
+  label: "",
+  first_name: "",
+  last_name: "",
+  phone: "",
+  company: "",
+  address_line1: "",
+  address_line2: "",
+  postal_code: "",
+  city: "",
+  region: "",
+  country: "España",
+  is_default: false,
 };
 
-const formatEUR = (n: number) =>
-  new Intl.NumberFormat("es-ES", {
-    style: "currency",
-    currency: "EUR",
-  }).format(Number.isFinite(n) ? n : 0);
+const GOOGLE_MAPS_API_KEY =
+  import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ?? "";
 
-function formatDate(dt?: string | null) {
-  if (!dt) return "—";
+let googleMapsConfigured = false;
 
-  const d = new Date(dt);
-
-  if (Number.isNaN(d.getTime())) return dt;
-
-  return new Intl.DateTimeFormat("es-ES", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(d);
-}
-
-function buildShippingText(addr: any) {
-  if (!addr) return "—";
-
-  const parts = [
-    [addr.first_name, addr.last_name].filter(Boolean).join(" ").trim(),
-    addr.company,
-    addr.line1,
-    addr.line2,
-    [addr.postal_code, addr.city].filter(Boolean).join(" ").trim(),
-    addr.region,
-    addr.country,
-  ].filter(Boolean);
-
-  return parts.join(", ");
-}
-
-function statusLabel(status: OrderRow["status"]) {
-  if (status === "paid") return "Pagado";
-  if (status === "pending") return "Pendiente";
-  return "Cancelado";
-}
-
-async function imageToDataUrl(src: string): Promise<string | null> {
-  try {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("No se pudo cargar el logo"));
-      img.src = src;
-    });
-
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-
-    ctx.drawImage(img, 0, 0);
-
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
+function configureGoogleMaps() {
+  if (googleMapsConfigured || !GOOGLE_MAPS_API_KEY) {
+    return;
   }
+
+  setOptions({
+    key: GOOGLE_MAPS_API_KEY,
+    v: "weekly",
+    language: "es",
+    region: "ES",
+  });
+
+  googleMapsConfigured = true;
 }
 
-function safeNumber(value: any) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function getSubtotal(order: OrderRow) {
-  return (order.order_items ?? []).reduce((acc, item) => {
-    return acc + safeNumber(item.unit_price) * safeNumber(item.quantity);
-  }, 0);
-}
-
-export default function UserPedidos() {
-  const navigate = useNavigate();
-
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-
-  const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
-
-  const openOrder = useMemo(
-    () => orders.find((order) => order.id === openId) ?? null,
-    [orders, openId]
+function getAddressComponent(
+  components: google.maps.GeocoderAddressComponent[],
+  type: string,
+  useShortName = false
+) {
+  const component = components.find((item) =>
+    item.types.includes(type)
   );
 
-  const load = async () => {
-    setLoading(true);
-    setErr(null);
+  if (!component) return "";
 
-    const { data: auth, error: authError } = await supabase.auth.getUser();
+  return useShortName
+    ? component.short_name
+    : component.long_name;
+}
 
-    if (authError || !auth?.user) {
-      navigate("/login");
-      return;
-    }
+export default function UserProfile() {
+  const navigate = useNavigate();
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,user_id,status,total_amount,currency,created_at,updated_at,paid_at,
-        customer_email,customer_name,customer_phone,
-        shipping_method,shipping_amount,shipping_address,
-        order_items (
-          id,
-          product_id,
-          product_name,
-          unit_price,
-          quantity,
-          created_at
-        ),
-        invoices!invoices_order_id_fkey (
-          invoice_code,
-          invoice_date,
-          pdf_url
-        )
-      `
-      )
-      .eq("user_id", auth.user.id)
-      .order("created_at", { ascending: false });
+  const {
+    user,
+    setUser,
+    initializing,
+  } = useUser();
 
-    if (error) {
-      setErr(error.message);
-      setOrders([]);
-      setLoading(false);
-      return;
-    }
+  const [activeSection, setActiveSection] =
+    useState<ProfileSection>("datos");
 
-    const rows = (data ?? []) as OrderRow[];
+  const [profile, setProfile] =
+    useState<ProfileForm>({
+      first_name: "",
+      last_name: "",
+      phone: "",
+    });
 
-    setOrders(rows);
+  const [addresses, setAddresses] =
+    useState<AddressRow[]>([]);
 
-    if (!openId && rows.length > 0) {
-      setOpenId(rows[0].id);
-    }
+  const [addressForm, setAddressForm] =
+    useState<AddressForm>(emptyAddress);
 
-    setLoading(false);
-  };
+
+  const addressAutocompleteInputRef =
+    useRef<HTMLInputElement | null>(null);
+
+  const autocompleteInstanceRef =
+    useRef<google.maps.places.Autocomplete | null>(null);
+
+  const [mapsError, setMapsError] =
+    useState<string | null>(null);
+
+  const [editingAddressId, setEditingAddressId] =
+    useState<string | null>(null);
+
+  const [showAddressForm, setShowAddressForm] =
+    useState(false);
+
+  const [loadingProfile, setLoadingProfile] =
+    useState(true);
+
+  const [savingProfile, setSavingProfile] =
+    useState(false);
+
+  const [savingAddress, setSavingAddress] =
+    useState(false);
+
+  const [deletingAddressId, setDeletingAddressId] =
+    useState<string | null>(null);
+
+  const [sendingPasswordEmail, setSendingPasswordEmail] =
+    useState(false);
+
+  const [notice, setNotice] =
+    useState<Notice>(null);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (initializing) return;
 
-  const downloadOrderPdf = async (order: OrderRow) => {
-    setPdfLoadingId(order.id);
-
-    try {
-      const doc = new jsPDF({
-        orientation: "portrait",
-        unit: "mm",
-        format: "a4",
+    if (!user) {
+      navigate("/usuario", {
+        replace: true,
       });
+      return;
+    }
 
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
+    let alive = true;
 
-      const marginX = 16;
-      const rightX = pageWidth - marginX;
-      let y = 16;
+    const loadAll = async () => {
+      setLoadingProfile(true);
+      setNotice(null);
 
-      const logoDataUrl = await imageToDataUrl(logoUrl);
+      const [profileResult, addressesResult] =
+        await Promise.all([
+          supabase
+            .from("profiles")
+            .select(
+              `
+                first_name,
+                last_name,
+                phone
+              `
+            )
+            .eq("id", user.id)
+            .maybeSingle(),
 
-      const drawFooter = () => {
-        const footerY = pageHeight - 14;
+          supabase
+            .from("user_addresses")
+            .select("*")
+            .eq("user_id", user.id)
+            .order("is_default", {
+              ascending: false,
+            })
+            .order("created_at", {
+              ascending: true,
+            }),
+        ]);
 
-        doc.setDrawColor(...BRAND_COLOR.border);
-        doc.line(marginX, footerY - 6, rightX, footerY - 6);
+      if (!alive) return;
 
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.setTextColor(...BRAND_COLOR.muted);
-
-        doc.text(
-          "Gracias por confiar en SAMINATURA. Este documento es un resumen/recibo del pedido.",
-          marginX,
-          footerY
-        );
-
-        doc.text(`Página ${doc.getNumberOfPages()}`, rightX, footerY, {
-          align: "right",
+      if (profileResult.error) {
+        setNotice({
+          type: "error",
+          message:
+            "No se han podido cargar tus datos: " +
+            profileResult.error.message,
         });
-      };
-
-      const checkPageBreak = (neededSpace = 20) => {
-        if (y + neededSpace > pageHeight - 25) {
-          drawFooter();
-          doc.addPage();
-          y = 18;
-        }
-      };
-
-      const sectionTitle = (title: string) => {
-        checkPageBreak(14);
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.setTextColor(...BRAND_COLOR.dark);
-        doc.text(title, marginX, y);
-
-        y += 3;
-
-        doc.setDrawColor(...BRAND_COLOR.green);
-        doc.setLineWidth(0.5);
-        doc.line(marginX, y, marginX + 32, y);
-
-        y += 8;
-      };
-
-      // HEADER
-      if (logoDataUrl) {
-        doc.addImage(logoDataUrl, "PNG", marginX, 12, 62, 24);
-      } else {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(22);
-        doc.setTextColor(...BRAND_COLOR.dark);
-        doc.text(COMPANY.name, marginX, 24);
       }
 
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.setTextColor(...BRAND_COLOR.dark);
-      doc.text("Resumen de pedido", rightX, 20, { align: "right" });
+      setProfile({
+        first_name:
+          profileResult.data?.first_name ??
+          String(
+            user.user_metadata?.first_name ?? ""
+          ),
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(...BRAND_COLOR.muted);
-      doc.text(`Pedido: ${order.id}`, rightX, 27, { align: "right" });
-      doc.text(`Fecha: ${formatDate(order.created_at)}`, rightX, 32, {
-        align: "right",
+        last_name:
+          profileResult.data?.last_name ??
+          String(
+            user.user_metadata?.last_name ?? ""
+          ),
+
+        phone:
+          profileResult.data?.phone ?? "",
       });
 
-      y = 44;
+      if (addressesResult.error) {
+        setNotice({
+          type: "error",
+          message:
+            "No se han podido cargar tus direcciones: " +
+            addressesResult.error.message,
+        });
 
-      // BLOQUE SUPERIOR
-      const topBoxY = y;
-      const topBoxH = 40;
-      const topBoxW = pageWidth - marginX * 2;
-
-      doc.setFillColor(...BRAND_COLOR.soft);
-      doc.setDrawColor(...BRAND_COLOR.border);
-      doc.roundedRect(marginX, topBoxY, topBoxW, topBoxH, 3, 3, "FD");
-
-      const leftX = marginX + 5;
-      const rightColX = rightX - 42;
-      const leftMaxWidth = 112;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10.5);
-      doc.setTextColor(...BRAND_COLOR.dark);
-      doc.text(COMPANY.name, leftX, topBoxY + 8);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.setTextColor(...BRAND_COLOR.muted);
-
-      let companyInfoY = topBoxY + 14;
-
-      const companyInfoLines = [
-        COMPANY.subtitle,
-        COMPANY.address,
-        `Tel. ${COMPANY.phone}`,
-      ];
-
-      companyInfoLines.forEach((line) => {
-        const lines = doc.splitTextToSize(line, leftMaxWidth);
-        doc.text(lines, leftX, companyInfoY);
-        companyInfoY += lines.length * 4.2;
-      });
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9.5);
-      doc.setTextColor(...BRAND_COLOR.dark);
-      doc.text("Estado", rightColX, topBoxY + 8);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(...BRAND_COLOR.text);
-      doc.text(statusLabel(order.status), rightColX, topBoxY + 14);
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9.5);
-      doc.setTextColor(...BRAND_COLOR.dark);
-      doc.text("Pago", rightColX, topBoxY + 23);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(...BRAND_COLOR.text);
-      doc.text(
-        order.paid_at ? formatDate(order.paid_at) : "—",
-        rightColX,
-        topBoxY + 29
-      );
-
-      y += topBoxH + 12;
-
-      // CLIENTE Y ENVÍO
-      const boxGap = 8;
-      const boxWidth = (pageWidth - marginX * 2 - boxGap) / 2;
-      const boxY = y;
-      const boxH = 58;
-
-      doc.setDrawColor(...BRAND_COLOR.border);
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(marginX, boxY, boxWidth, boxH, 3, 3, "S");
-      doc.roundedRect(
-        marginX + boxWidth + boxGap,
-        boxY,
-        boxWidth,
-        boxH,
-        3,
-        3,
-        "S"
-      );
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(...BRAND_COLOR.dark);
-      doc.text("Cliente", marginX + 5, boxY + 8);
-      doc.text("Envío", marginX + boxWidth + boxGap + 5, boxY + 8);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(...BRAND_COLOR.text);
-
-      const clientLines = [
-        order.customer_name ?? "—",
-        order.customer_email ?? "—",
-        order.customer_phone ? `Tel. ${order.customer_phone}` : "Tel. —",
-      ];
-
-      let clientY = boxY + 17;
-
-      clientLines.forEach((line) => {
-        const lines = doc.splitTextToSize(line, boxWidth - 10);
-        doc.text(lines, marginX + 5, clientY);
-        clientY += lines.length * 4.5;
-      });
-
-      const shippingAddress = buildShippingText(order.shipping_address);
-
-      const shippingLines = [
-        `Método: ${order.shipping_method ?? "—"}`,
-        `Coste: ${formatEUR(safeNumber(order.shipping_amount))}`,
-        shippingAddress,
-      ];
-
-      let shipY = boxY + 17;
-
-      shippingLines.forEach((line) => {
-        const lines = doc.splitTextToSize(line, boxWidth - 10);
-        doc.text(lines, marginX + boxWidth + boxGap + 5, shipY);
-        shipY += lines.length * 4.5;
-      });
-
-      y = boxY + boxH + 14;
-
-      // ARTÍCULOS
-      sectionTitle("Artículos del pedido");
-
-      const tableX = marginX;
-      const tableW = pageWidth - marginX * 2;
-      const colProduct = tableX + 4;
-      const colQty = tableX + tableW - 64;
-      const colUnit = tableX + tableW - 43;
-      const colTotal = tableX + tableW - 8;
-
-      const drawTableHeader = () => {
-        doc.setFillColor(...BRAND_COLOR.dark);
-        doc.rect(tableX, y, tableW, 9, "F");
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8.5);
-        doc.setTextColor(255, 255, 255);
-
-        doc.text("Producto", colProduct, y + 6);
-        doc.text("Cant.", colQty, y + 6, { align: "right" });
-        doc.text("Precio", colUnit, y + 6, { align: "right" });
-        doc.text("Total", colTotal, y + 6, { align: "right" });
-
-        y += 9;
-      };
-
-      drawTableHeader();
-
-      const items = order.order_items ?? [];
-
-      if (items.length === 0) {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(...BRAND_COLOR.muted);
-        doc.text(
-          "No hay artículos registrados en este pedido.",
-          colProduct,
-          y + 8
-        );
-        y += 16;
+        setAddresses([]);
       } else {
-        items.forEach((item, index) => {
-          const quantity = safeNumber(item.quantity);
-          const unitPrice = safeNumber(item.unit_price);
-          const lineTotal = unitPrice * quantity;
+        setAddresses(
+          (addressesResult.data ?? []) as AddressRow[]
+        );
+      }
 
-          const productLines = doc.splitTextToSize(
-            item.product_name || "Producto sin nombre",
-            tableW - 74
-          );
+      setLoadingProfile(false);
+    };
 
-          const rowH = Math.max(10, productLines.length * 4.5 + 6);
+    void loadAll();
 
-          checkPageBreak(rowH + 12);
+    return () => {
+      alive = false;
+    };
+  }, [
+    initializing,
+    navigate,
+    user,
+  ]);
 
-          if (y < 25) {
-            drawTableHeader();
-          }
 
-          if (index % 2 === 0) {
-            doc.setFillColor(250, 250, 250);
-            doc.rect(tableX, y, tableW, rowH, "F");
-          }
+  useEffect(() => {
+    if (!showAddressForm) return;
 
-          doc.setDrawColor(235, 235, 235);
-          doc.line(tableX, y + rowH, tableX + tableW, y + rowH);
+    const input = addressAutocompleteInputRef.current;
 
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(8.8);
-          doc.setTextColor(...BRAND_COLOR.text);
-          doc.text(productLines, colProduct, y + 6);
+    if (!input) return;
 
-          doc.text(String(quantity), colQty, y + 6, { align: "right" });
-          doc.text(formatEUR(unitPrice), colUnit, y + 6, { align: "right" });
+    if (!GOOGLE_MAPS_API_KEY) {
+      setMapsError(
+        "Falta configurar VITE_GOOGLE_MAPS_API_KEY en el archivo .env."
+      );
+      return;
+    }
 
-          doc.setFont("helvetica", "bold");
-          doc.text(formatEUR(lineTotal), colTotal, y + 6, {
-            align: "right",
+    let listener:
+      | google.maps.MapsEventListener
+      | null = null;
+
+    let cancelled = false;
+
+    const initializeAutocomplete = async () => {
+      try {
+        configureGoogleMaps();
+
+        const placesLibrary =
+          (await importLibrary(
+            "places"
+          )) as google.maps.PlacesLibrary;
+
+        if (cancelled) return;
+
+        const autocomplete =
+          new placesLibrary.Autocomplete(input, {
+            fields: [
+              "address_components",
+              "formatted_address",
+              "name",
+            ],
+            types: ["address"],
+            componentRestrictions: {
+              country: "es",
+            },
           });
 
-          y += rowH;
-        });
+        autocompleteInstanceRef.current =
+          autocomplete;
+
+        listener = autocomplete.addListener(
+          "place_changed",
+          () => {
+            const place = autocomplete.getPlace();
+            const components =
+              place.address_components ?? [];
+
+            if (components.length === 0) {
+              setMapsError(
+                "Selecciona una dirección de la lista de Google para completar los campos."
+              );
+              return;
+            }
+
+            const streetNumber =
+              getAddressComponent(
+                components,
+                "street_number"
+              );
+
+            const route = getAddressComponent(
+              components,
+              "route"
+            );
+
+            const addressLine1 = [
+              route,
+              streetNumber,
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            const selectedAddress =
+              addressLine1 ||
+              place.name ||
+              input.value;
+
+            input.value = selectedAddress;
+
+            const subpremise =
+              getAddressComponent(
+                components,
+                "subpremise"
+              );
+
+            const postalCode =
+              getAddressComponent(
+                components,
+                "postal_code"
+              );
+
+            const city =
+              getAddressComponent(
+                components,
+                "locality"
+              ) ||
+              getAddressComponent(
+                components,
+                "postal_town"
+              ) ||
+              getAddressComponent(
+                components,
+                "administrative_area_level_3"
+              );
+
+            const region =
+              getAddressComponent(
+                components,
+                "administrative_area_level_2"
+              ) ||
+              getAddressComponent(
+                components,
+                "administrative_area_level_1"
+              );
+
+            const country =
+              getAddressComponent(
+                components,
+                "country"
+              );
+
+            setAddressForm((current) => ({
+              ...current,
+              address_line1:
+                selectedAddress ||
+                current.address_line1,
+              address_line2:
+                subpremise ||
+                current.address_line2,
+              postal_code:
+                postalCode ||
+                current.postal_code,
+              city: city || current.city,
+              region:
+                region || current.region,
+              country:
+                country || current.country,
+            }));
+
+            setMapsError(null);
+          }
+        );
+
+        setMapsError(null);
+      } catch (error) {
+        console.error(
+          "Error cargando Google Places:",
+          error
+        );
+
+        if (!cancelled) {
+          setMapsError(
+            "No se ha podido cargar el buscador de direcciones de Google. Revisa la API key y las APIs activadas."
+          );
+        }
+      }
+    };
+
+    void initializeAutocomplete();
+
+    return () => {
+      cancelled = true;
+
+      if (listener) {
+        listener.remove();
       }
 
-      y += 8;
+      autocompleteInstanceRef.current = null;
+    };
+  }, [
+    editingAddressId,
+    showAddressForm,
+  ]);
 
-      // TOTALES
-      checkPageBreak(42);
+  const reloadAddresses = async () => {
+    if (!user) return;
 
-      const subtotal = getSubtotal(order);
-      const shipping = safeNumber(order.shipping_amount);
-      const total = safeNumber(order.total_amount);
-
-      const totalBoxW = 72;
-      const totalBoxX = rightX - totalBoxW;
-
-      doc.setDrawColor(...BRAND_COLOR.border);
-      doc.setFillColor(...BRAND_COLOR.soft);
-      doc.roundedRect(totalBoxX, y, totalBoxW, 34, 3, 3, "FD");
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(...BRAND_COLOR.text);
-
-      doc.text("Subtotal", totalBoxX + 6, y + 8);
-      doc.text(formatEUR(subtotal), totalBoxX + totalBoxW - 6, y + 8, {
-        align: "right",
+    const { data, error } = await supabase
+      .from("user_addresses")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("is_default", {
+        ascending: false,
+      })
+      .order("created_at", {
+        ascending: true,
       });
 
-      doc.text("Envío", totalBoxX + 6, y + 16);
-      doc.text(formatEUR(shipping), totalBoxX + totalBoxW - 6, y + 16, {
-        align: "right",
+    if (error) {
+      setNotice({
+        type: "error",
+        message:
+          "No se han podido actualizar las direcciones: " +
+          error.message,
       });
 
-      doc.setDrawColor(...BRAND_COLOR.border);
-      doc.line(totalBoxX + 6, y + 21, totalBoxX + totalBoxW - 6, y + 21);
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(...BRAND_COLOR.dark);
-      doc.text("Total", totalBoxX + 6, y + 29);
-      doc.text(formatEUR(total), totalBoxX + totalBoxW - 6, y + 29, {
-        align: "right",
-      });
-
-      y += 48;
-
-      // NOTA LEGAL
-      checkPageBreak(25);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.setTextColor(...BRAND_COLOR.muted);
-
-      const note =
-        "Este documento es un resumen del pedido realizado en SAMINATURA. No sustituye una factura legal si esta debe emitirse con numeración fiscal, NIF/CIF, desglose de impuestos y datos fiscales completos.";
-
-      const noteLines = doc.splitTextToSize(note, pageWidth - marginX * 2);
-      doc.text(noteLines, marginX, y);
-
-      drawFooter();
-
-      doc.save(`pedido-saminatura-${order.id}.pdf`);
-    } finally {
-      setPdfLoadingId(null);
+      return;
     }
+
+    setAddresses(
+      (data ?? []) as AddressRow[]
+    );
   };
 
-  if (loading) {
-    return <div className="p-8 text-gray-600">Cargando pedidos…</div>;
+  const changeSection = (
+    section: ProfileSection
+  ) => {
+    setActiveSection(section);
+    setNotice(null);
+  };
+
+  const updateProfileField = <
+    K extends keyof ProfileForm
+  >(
+    field: K,
+    value: ProfileForm[K]
+  ) => {
+    setProfile((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const updateAddressField = <
+    K extends keyof AddressForm
+  >(
+    field: K,
+    value: AddressForm[K]
+  ) => {
+    setAddressForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const openNewAddressForm = () => {
+    setEditingAddressId(null);
+
+    setAddressForm({
+      ...emptyAddress,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      phone: profile.phone,
+      is_default: addresses.length === 0,
+    });
+
+    setShowAddressForm(true);
+    setNotice(null);
+    setMapsError(null);
+  };
+
+  const openEditAddressForm = (
+    address: AddressRow
+  ) => {
+    setEditingAddressId(address.id);
+
+    setAddressForm({
+      label: address.label ?? "",
+      first_name:
+        address.first_name ?? "",
+      last_name:
+        address.last_name ?? "",
+      phone: address.phone ?? "",
+      company: address.company ?? "",
+      address_line1:
+        address.address_line1,
+      address_line2:
+        address.address_line2 ?? "",
+      postal_code:
+        address.postal_code,
+      city: address.city,
+      region: address.region ?? "",
+      country:
+        address.country || "España",
+      is_default: address.is_default,
+    });
+
+    setShowAddressForm(true);
+    setNotice(null);
+    setMapsError(null);
+  };
+
+  const closeAddressForm = () => {
+    setShowAddressForm(false);
+    setEditingAddressId(null);
+    setAddressForm(emptyAddress);
+    setMapsError(null);
+  };
+
+  const savePersonalData = async () => {
+    if (!user) return;
+
+    setSavingProfile(true);
+    setNotice(null);
+
+    const firstName =
+      profile.first_name.trim();
+
+    const lastName =
+      profile.last_name.trim();
+
+    const phone =
+      profile.phone.trim();
+
+    const { error: profileError } =
+      await supabase
+        .from("profiles")
+        .upsert(
+          {
+            id: user.id,
+            first_name:
+              firstName || null,
+            last_name:
+              lastName || null,
+            phone:
+              phone || null,
+            updated_at:
+              new Date().toISOString(),
+          },
+          {
+            onConflict: "id",
+          }
+        );
+
+    if (profileError) {
+      setSavingProfile(false);
+
+      setNotice({
+        type: "error",
+        message:
+          "No se han podido guardar tus datos: " +
+          profileError.message,
+      });
+
+      return;
+    }
+
+    const {
+      data,
+      error: authError,
+    } = await supabase.auth.updateUser({
+      data: {
+        first_name: firstName,
+        last_name: lastName,
+      },
+    });
+
+    setSavingProfile(false);
+
+    if (authError) {
+      setNotice({
+        type: "error",
+        message:
+          "Los datos se guardaron en el perfil, pero no se pudieron actualizar en la cuenta: " +
+          authError.message,
+      });
+
+      return;
+    }
+
+    setUser(data.user);
+
+    setNotice({
+      type: "success",
+      message:
+        "Tus datos personales se han guardado correctamente.",
+    });
+  };
+
+  const saveAddress = async () => {
+    if (!user) return;
+
+    const addressLine1 =
+      addressForm.address_line1.trim();
+
+    const postalCode =
+      addressForm.postal_code.trim();
+
+    const city =
+      addressForm.city.trim();
+
+    const country =
+      addressForm.country.trim();
+
+    if (
+      !addressLine1 ||
+      !postalCode ||
+      !city ||
+      !country
+    ) {
+      setNotice({
+        type: "error",
+        message:
+          "Completa la dirección, el código postal, la localidad y el país.",
+      });
+
+      return;
+    }
+
+    setSavingAddress(true);
+    setNotice(null);
+
+    const payload = {
+      user_id: user.id,
+
+      label:
+        addressForm.label.trim() ||
+        null,
+
+      first_name:
+        addressForm.first_name.trim() ||
+        null,
+
+      last_name:
+        addressForm.last_name.trim() ||
+        null,
+
+      phone:
+        addressForm.phone.trim() ||
+        null,
+
+      company:
+        addressForm.company.trim() ||
+        null,
+
+      address_line1:
+        addressLine1,
+
+      address_line2:
+        addressForm.address_line2.trim() ||
+        null,
+
+      postal_code:
+        postalCode,
+
+      city,
+
+      region:
+        addressForm.region.trim() ||
+        null,
+
+      country,
+
+      is_default:
+        addresses.length === 0
+          ? true
+          : addressForm.is_default,
+    };
+
+    const result = editingAddressId
+      ? await supabase
+          .from("user_addresses")
+          .update(payload)
+          .eq("id", editingAddressId)
+          .eq("user_id", user.id)
+      : await supabase
+          .from("user_addresses")
+          .insert(payload);
+
+    setSavingAddress(false);
+
+    if (result.error) {
+      setNotice({
+        type: "error",
+        message:
+          "No se ha podido guardar la dirección: " +
+          result.error.message,
+      });
+
+      return;
+    }
+
+    await reloadAddresses();
+    closeAddressForm();
+
+    setNotice({
+      type: "success",
+      message: editingAddressId
+        ? "La dirección se ha actualizado correctamente."
+        : "La dirección se ha añadido correctamente.",
+    });
+  };
+
+  const setDefaultAddress = async (
+    addressId: string
+  ) => {
+    if (!user) return;
+
+    setNotice(null);
+
+    const { error } = await supabase
+      .from("user_addresses")
+      .update({
+        is_default: true,
+      })
+      .eq("id", addressId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      setNotice({
+        type: "error",
+        message:
+          "No se ha podido marcar la dirección como principal: " +
+          error.message,
+      });
+
+      return;
+    }
+
+    await reloadAddresses();
+
+    setNotice({
+      type: "success",
+      message:
+        "La dirección se ha establecido como principal.",
+    });
+  };
+
+  const deleteAddress = async (
+    address: AddressRow
+  ) => {
+    if (!user) return;
+
+    const confirmed = window.confirm(
+      "¿Quieres eliminar esta dirección?"
+    );
+
+    if (!confirmed) return;
+
+    setDeletingAddressId(address.id);
+    setNotice(null);
+
+    const { error } = await supabase
+      .from("user_addresses")
+      .delete()
+      .eq("id", address.id)
+      .eq("user_id", user.id);
+
+    if (error) {
+      setDeletingAddressId(null);
+
+      setNotice({
+        type: "error",
+        message:
+          "No se ha podido eliminar la dirección: " +
+          error.message,
+      });
+
+      return;
+    }
+
+    const remainingAddresses =
+      addresses.filter(
+        (item) => item.id !== address.id
+      );
+
+    if (
+      address.is_default &&
+      remainingAddresses.length > 0
+    ) {
+      await supabase
+        .from("user_addresses")
+        .update({
+          is_default: true,
+        })
+        .eq(
+          "id",
+          remainingAddresses[0].id
+        )
+        .eq("user_id", user.id);
+    }
+
+    setDeletingAddressId(null);
+    await reloadAddresses();
+
+    if (
+      editingAddressId === address.id
+    ) {
+      closeAddressForm();
+    }
+
+    setNotice({
+      type: "success",
+      message:
+        "La dirección se ha eliminado correctamente.",
+    });
+  };
+
+  const sendPasswordResetEmail =
+    async () => {
+      if (!user?.email) {
+        setNotice({
+          type: "error",
+          message:
+            "No se ha encontrado un correo electrónico asociado a tu cuenta.",
+        });
+
+        return;
+      }
+
+      setSendingPasswordEmail(true);
+      setNotice(null);
+
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(
+          user.email,
+          {
+            redirectTo: `${window.location.origin}/reset-password`,
+          }
+        );
+
+      setSendingPasswordEmail(false);
+
+      if (error) {
+        setNotice({
+          type: "error",
+          message:
+            "No se ha podido enviar el correo para cambiar la contraseña: " +
+            error.message,
+        });
+
+        return;
+      }
+
+      setNotice({
+        type: "success",
+        message:
+          "Te hemos enviado un correo con un enlace seguro para cambiar la contraseña.",
+      });
+    };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+
+    setUser(null);
+
+    navigate("/usuario", {
+      replace: true,
+    });
+  };
+
+  if (
+    initializing ||
+    loadingProfile
+  ) {
+    return (
+      <section className="flex min-h-[520px] items-center justify-center bg-[#f5f1e8]">
+        <p className="text-[#697361]">
+          Cargando tu perfil…
+        </p>
+      </section>
+    );
   }
 
-  if (err) {
-    return <div className="p-8 text-red-600">Error: {err}</div>;
-  }
+  if (!user) return null;
+
+  const menuClass = (
+    section: ProfileSection
+  ) =>
+    `w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+      activeSection === section
+        ? "bg-white text-[#425530] shadow-sm"
+        : "text-white/75 hover:bg-white/10 hover:text-white"
+    }`;
+
+  const inputClass =
+    "mt-2 w-full rounded-xl border border-[#d6ddcf] bg-[#fbfcf9] px-4 py-3 text-[#26341f] outline-none transition placeholder:text-[#a1a99b] focus:border-[#718360] focus:ring-4 focus:ring-[#718360]/10";
 
   return (
-    <main className="min-h-screen bg-gray-100 py-10">
-      <div className="mx-auto max-w-6xl px-4">
-        <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-200">
-          <div className="border-b bg-white p-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">
+    <section className="bg-[#f5f1e8] px-4 py-10 sm:px-6">
+      <div className="mx-auto max-w-7xl">
+        <div className="grid overflow-hidden rounded-[2rem] border border-[#d7dece] bg-white shadow-[0_22px_60px_rgba(49,65,34,0.14)] lg:grid-cols-[270px_minmax(0,1fr)]">
+          <aside className="relative overflow-hidden bg-[#425530] p-6 text-white sm:p-7">
+            <div className="pointer-events-none absolute -left-20 top-8 h-52 w-52 rounded-full bg-white/10 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-20 -right-16 h-64 w-64 rounded-full bg-[#aabb98]/20 blur-3xl" />
+
+            <div className="relative z-10">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">
+                Área personal
+              </p>
+
+              <h1 className="mt-3 text-2xl font-semibold">
+                Mi perfil
+              </h1>
+
+              <p className="mt-2 break-all text-sm text-white/65">
+                {user.email}
+              </p>
+
+              <nav className="mt-8 space-y-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSection("datos")
+                  }
+                  className={menuClass("datos")}
+                >
+                  Mis datos
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSection("direcciones")
+                  }
+                  className={menuClass(
+                    "direcciones"
+                  )}
+                >
+                  Mis direcciones
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSection("pedidos")
+                  }
+                  className={menuClass(
+                    "pedidos"
+                  )}
+                >
                   Mis pedidos
-                </h1>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  Consulta tu historial, revisa los detalles y descarga el
-                  resumen de cada pedido.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate("/profile")}
-                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                >
-                  Volver al perfil
                 </button>
 
                 <button
                   type="button"
-                  onClick={load}
-                  className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-900"
+                  onClick={() =>
+                    changeSection("seguridad")
+                  }
+                  className={menuClass(
+                    "seguridad"
+                  )}
                 >
-                  Recargar
+                  Cambiar contraseña
                 </button>
-              </div>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="mt-6 w-full rounded-xl border border-white/20 px-4 py-3 text-left text-sm font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+                >
+                  Cerrar sesión
+                </button>
+              </nav>
             </div>
-          </div>
+          </aside>
 
-          <div className="lg:grid lg:grid-cols-12 lg:divide-x">
-            <section className="p-6 lg:col-span-5">
-              {orders.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-600">
-                  Aún no tienes pedidos.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {orders.map((order) => (
-                    <button
-                      key={order.id}
-                      type="button"
-                      onClick={() => setOpenId(order.id)}
-                      className={`w-full rounded-xl border p-4 text-left transition hover:bg-gray-50 ${
-                        openId === order.id
-                          ? "border-black bg-gray-50"
-                          : "border-gray-200 bg-white"
-                      }`}
+          <div className="min-w-0 p-6 sm:p-8 lg:p-10">
+            {notice && (
+              <div
+                className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
+                  notice.type === "success"
+                    ? "border-[#cadabd] bg-[#f2f7ee] text-[#34502a]"
+                    : "border-red-200 bg-red-50 text-red-700"
+                }`}
+              >
+                {notice.message}
+              </div>
+            )}
+
+            {activeSection === "datos" && (
+              <section>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7d8a70]">
+                  Información personal
+                </p>
+
+                <h2 className="mt-2 text-2xl font-semibold text-[#26341f]">
+                  Mis datos
+                </h2>
+
+                <p className="mt-2 text-sm text-[#737d6c]">
+                  Consulta y actualiza los datos asociados a tu cuenta.
+                </p>
+
+                <div className="mt-8 grid gap-5 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="profileFirstName"
+                      className="block text-sm font-semibold text-[#34412d]"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium uppercase tracking-wide text-gray-400">
-                            Pedido
-                          </div>
+                      Nombre
+                    </label>
 
-                          <div className="mt-1 break-all text-sm font-semibold text-gray-900">
-                            {order.id}
-                          </div>
+                    <input
+                      id="profileFirstName"
+                      type="text"
+                      value={
+                        profile.first_name
+                      }
+                      onChange={(event) =>
+                        updateProfileField(
+                          "first_name",
+                          event.target.value
+                        )
+                      }
+                      className={inputClass}
+                    />
+                  </div>
 
-                          <div className="mt-2 text-sm text-gray-600">
-                            {formatDate(order.created_at)}
-                          </div>
-                        </div>
+                  <div>
+                    <label
+                      htmlFor="profileLastName"
+                      className="block text-sm font-semibold text-[#34412d]"
+                    >
+                      Apellidos
+                    </label>
 
-                        <div className="shrink-0 text-right">
-                          <div className="text-sm font-bold text-gray-900">
-                            {formatEUR(safeNumber(order.total_amount))}
-                          </div>
+                    <input
+                      id="profileLastName"
+                      type="text"
+                      value={
+                        profile.last_name
+                      }
+                      onChange={(event) =>
+                        updateProfileField(
+                          "last_name",
+                          event.target.value
+                        )
+                      }
+                      className={inputClass}
+                    />
+                  </div>
 
-                          <div
-                            className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                              order.status === "paid"
-                                ? "bg-green-100 text-green-700"
-                                : order.status === "pending"
-                                ? "bg-yellow-100 text-yellow-700"
-                                : "bg-red-100 text-red-700"
-                            }`}
-                          >
-                            {statusLabel(order.status)}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                  <div>
+                    <label
+                      htmlFor="profilePhone"
+                      className="block text-sm font-semibold text-[#34412d]"
+                    >
+                      Teléfono
+                    </label>
+
+                    <input
+                      id="profilePhone"
+                      type="tel"
+                      value={profile.phone}
+                      onChange={(event) =>
+                        updateProfileField(
+                          "phone",
+                          event.target.value
+                        )
+                      }
+                      autoComplete="tel"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="profileEmail"
+                      className="block text-sm font-semibold text-[#34412d]"
+                    >
+                      Correo electrónico
+                    </label>
+
+                    <input
+                      id="profileEmail"
+                      type="email"
+                      value={
+                        user.email ?? ""
+                      }
+                      disabled
+                      className="mt-2 w-full cursor-not-allowed rounded-xl border border-[#e0e4db] bg-[#f2f3ef] px-4 py-3 text-[#8a9184]"
+                    />
+                  </div>
                 </div>
-              )}
-            </section>
 
-            <section className="p-6 lg:col-span-7">
-              {!openOrder ? (
-                <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-600">
-                  Selecciona un pedido para ver el detalle.
+                <button
+                  type="button"
+                  onClick={() =>
+                    void savePersonalData()
+                  }
+                  disabled={savingProfile}
+                  className="mt-8 rounded-xl bg-[#425530] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:opacity-50"
+                >
+                  {savingProfile
+                    ? "Guardando…"
+                    : "Guardar datos"}
+                </button>
+              </section>
+            )}
+
+            {activeSection ===
+              "direcciones" && (
+              <section>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7d8a70]">
+                      Datos de envío
+                    </p>
+
+                    <h2 className="mt-2 text-2xl font-semibold text-[#26341f]">
+                      Mis direcciones
+                    </h2>
+
+                    <p className="mt-2 text-sm text-[#737d6c]">
+                      Guarda varias direcciones y elige cuál quieres utilizar como principal.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={openNewAddressForm}
+                    className="rounded-xl bg-[#425530] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#344526]"
+                  >
+                    Añadir dirección
+                  </button>
                 </div>
-              ) : (
-                <div>
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900">
-                        Detalle del pedido
-                      </h2>
 
-                      <div className="mt-1 break-all text-sm text-gray-500">
-                        {openOrder.id}
-                      </div>
+                {addresses.length === 0 ? (
+                  <div className="mt-8 rounded-2xl border border-dashed border-[#ccd5c3] bg-[#fafbf8] p-10 text-center">
+                    <p className="font-semibold text-[#394631]">
+                      Todavía no tienes direcciones
+                    </p>
 
-                      <div className="mt-3 grid gap-1 text-sm text-gray-700">
-                        <div>
-                          Estado:{" "}
-                          <span className="font-medium">
-                            {statusLabel(openOrder.status)}
-                          </span>
-                        </div>
-
-                        <div>
-                          Creado:{" "}
-                          <span className="font-medium">
-                            {formatDate(openOrder.created_at)}
-                          </span>
-                        </div>
-
-                        <div>
-                          Pagado:{" "}
-                          <span className="font-medium">
-                            {formatDate(openOrder.paid_at)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {openOrder.invoices?.[0]?.pdf_url ? (
-                        <a
-                          href={openOrder.invoices[0].pdf_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                    <p className="mt-2 text-sm text-[#788170]">
+                      Añade una dirección para utilizarla en tus pedidos.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-8 grid gap-4 md:grid-cols-2">
+                    {addresses.map(
+                      (address) => (
+                        <article
+                          key={address.id}
+                          className={`relative rounded-2xl border p-5 ${
+                            address.is_default
+                              ? "border-[#718360] bg-[#f4f7f1]"
+                              : "border-[#dce2d5] bg-white"
+                          }`}
                         >
-                          Ver factura PDF
-                        </a>
-                      ) : null}
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="font-semibold text-[#2c3a25]">
+                                  {address.label ||
+                                    "Dirección"}
+                                </h3>
+
+                                {address.is_default && (
+                                  <span className="rounded-full bg-[#425530] px-2.5 py-1 text-[11px] font-semibold text-white">
+                                    Principal
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mt-3 text-sm font-medium text-[#3c4935]">
+                                {[
+                                  address.first_name,
+                                  address.last_name,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              </p>
+
+                              {address.company && (
+                                <p className="mt-1 text-sm text-[#687261]">
+                                  {address.company}
+                                </p>
+                              )}
+
+                              <p className="mt-2 text-sm leading-6 text-[#687261]">
+                                {address.address_line1}
+                                {address.address_line2
+                                  ? `, ${address.address_line2}`
+                                  : ""}
+                                <br />
+                                {address.postal_code}{" "}
+                                {address.city}
+                                {address.region
+                                  ? `, ${address.region}`
+                                  : ""}
+                                <br />
+                                {address.country}
+                              </p>
+
+                              {address.phone && (
+                                <p className="mt-2 text-sm text-[#687261]">
+                                  Tel. {address.phone}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="mt-5 flex flex-wrap gap-2">
+                            {!address.is_default && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void setDefaultAddress(
+                                    address.id
+                                  )
+                                }
+                                className="rounded-xl border border-[#718360] px-3 py-2 text-xs font-semibold text-[#425530] transition hover:bg-[#f0f4ec]"
+                              >
+                                Hacer principal
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openEditAddressForm(
+                                  address
+                                )
+                              }
+                              className="rounded-xl border border-[#d1d8ca] px-3 py-2 text-xs font-semibold text-[#52604b] transition hover:bg-[#f6f8f3]"
+                            >
+                              Modificar
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void deleteAddress(
+                                  address
+                                )
+                              }
+                              disabled={
+                                deletingAddressId ===
+                                address.id
+                              }
+                              className="rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                            >
+                              {deletingAddressId ===
+                              address.id
+                                ? "Eliminando…"
+                                : "Eliminar"}
+                            </button>
+                          </div>
+                        </article>
+                      )
+                    )}
+                  </div>
+                )}
+
+                {showAddressForm && (
+                  <div className="mt-8 rounded-2xl border border-[#dce3d5] bg-[#f8faf6] p-5 sm:p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-xl font-semibold text-[#2c3a25]">
+                          {editingAddressId
+                            ? "Modificar dirección"
+                            : "Añadir dirección"}
+                        </h3>
+
+                        <p className="mt-1 text-sm text-[#747e6d]">
+                          Los campos con dirección, código postal, localidad y país son obligatorios.
+                        </p>
+                      </div>
 
                       <button
                         type="button"
-                        onClick={() => downloadOrderPdf(openOrder)}
-                        disabled={pdfLoadingId === openOrder.id}
-                        className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={closeAddressForm}
+                        className="rounded-lg px-3 py-2 text-sm font-semibold text-[#697361] hover:bg-white"
                       >
-                        {pdfLoadingId === openOrder.id
-                          ? "Generando PDF…"
-                          : "Descargar resumen PDF"}
+                        Cerrar
+                      </button>
+                    </div>
+
+                    <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Nombre de la dirección
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.label
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "label",
+                              event.target.value
+                            )
+                          }
+                          placeholder="Casa, trabajo, padres…"
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Nombre
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.first_name
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "first_name",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Apellidos
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.last_name
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "last_name",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Teléfono
+                        </label>
+
+                        <input
+                          type="tel"
+                          value={
+                            addressForm.phone
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "phone",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Empresa
+                          <span className="ml-1 font-normal text-[#8b9385]">
+                            (opcional)
+                          </span>
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.company
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "company",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Dirección
+                        </label>
+
+                        <input
+                          key={
+                            editingAddressId ??
+                            "new-address"
+                          }
+                          ref={addressAutocompleteInputRef}
+                          type="text"
+                          defaultValue={
+                            addressForm.address_line1
+                          }
+                          onInput={(event) =>
+                            updateAddressField(
+                              "address_line1",
+                              event.currentTarget.value
+                            )
+                          }
+                          placeholder="Empieza a escribir la calle y selecciona una opción"
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+
+                        <p className="mt-2 text-xs leading-5 text-[#7b8574]">
+                          Selecciona una sugerencia de Google para rellenar automáticamente el código postal, la localidad, la provincia y el país.
+                        </p>
+
+                        {mapsError && (
+                          <p className="mt-2 text-xs leading-5 text-amber-700">
+                            {mapsError}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Piso, puerta u otros datos
+                          <span className="ml-1 font-normal text-[#8b9385]">
+                            (opcional)
+                          </span>
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.address_line2
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "address_line2",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Código postal
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.postal_code
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "postal_code",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Localidad
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.city
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "city",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          Provincia o región
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.region
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "region",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[#34412d]">
+                          País
+                        </label>
+
+                        <input
+                          type="text"
+                          value={
+                            addressForm.country
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "country",
+                              event.target.value
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <label className="flex cursor-pointer items-center gap-3 sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={
+                            addressForm.is_default
+                          }
+                          onChange={(event) =>
+                            updateAddressField(
+                              "is_default",
+                              event.target.checked
+                            )
+                          }
+                          className="h-4 w-4 rounded border-[#cbd3c2] text-[#425530] focus:ring-[#718360]"
+                        />
+
+                        <span className="text-sm font-semibold text-[#44513e]">
+                          Usar como dirección principal
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="mt-7 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void saveAddress()
+                        }
+                        disabled={savingAddress}
+                        className="rounded-xl bg-[#425530] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:opacity-50"
+                      >
+                        {savingAddress
+                          ? "Guardando…"
+                          : editingAddressId
+                          ? "Guardar cambios"
+                          : "Añadir dirección"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={closeAddressForm}
+                        className="rounded-xl border border-[#ccd5c3] bg-white px-6 py-3 text-sm font-semibold text-[#52604b] hover:bg-[#f4f6f1]"
+                      >
+                        Cancelar
                       </button>
                     </div>
                   </div>
+                )}
+              </section>
+            )}
 
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="font-semibold text-gray-900">
-                        Cliente
-                      </div>
+            {activeSection ===
+              "pedidos" && (
+              <UserPedidosPanel />
+            )}
 
-                      <div className="mt-2 space-y-1 text-sm text-gray-700">
-                        <div>{openOrder.customer_name ?? "—"}</div>
-                        <div>{openOrder.customer_email ?? "—"}</div>
-                        <div>{openOrder.customer_phone ?? "—"}</div>
-                      </div>
-                    </div>
+            {activeSection ===
+              "seguridad" && (
+              <section>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7d8a70]">
+                  Seguridad
+                </p>
 
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="font-semibold text-gray-900">Envío</div>
+                <h2 className="mt-2 text-2xl font-semibold text-[#26341f]">
+                  Cambiar contraseña
+                </h2>
 
-                      <div className="mt-2 space-y-1 text-sm text-gray-700">
-                        <div>
-                          Método: {openOrder.shipping_method ?? "—"}{" "}
-                          ({formatEUR(safeNumber(openOrder.shipping_amount))})
-                        </div>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#737d6c]">
+                  Para proteger tu cuenta, te enviaremos un enlace seguro a tu correo electrónico.
+                </p>
 
-                        <div>
-                          Dirección:{" "}
-                          {buildShippingText(openOrder.shipping_address)}
-                        </div>
-                      </div>
-                    </div>
+                <div className="mt-8 max-w-xl rounded-2xl border border-[#dce3d5] bg-[#f7f9f5] p-5 sm:p-6">
+                  <p className="text-sm font-semibold text-[#34412d]">
+                    Correo de recuperación
+                  </p>
+
+                  <div className="mt-3 rounded-xl border border-[#d7ddd0] bg-white px-4 py-3 text-sm text-[#53604b]">
+                    {user.email}
                   </div>
 
-                  <div className="mt-6">
-                    <div className="font-semibold text-gray-900">
-                      Artículos
-                    </div>
-
-                    <div className="mt-3 overflow-hidden rounded-xl border border-gray-200">
-                      {(openOrder.order_items ?? []).map((item) => {
-                        const lineTotal =
-                          safeNumber(item.unit_price) *
-                          safeNumber(item.quantity);
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="flex items-center justify-between gap-4 border-b border-gray-100 p-4 last:border-b-0"
-                          >
-                            <div className="min-w-0">
-                              <div className="font-medium text-gray-900">
-                                {item.product_name}
-                              </div>
-
-                              <div className="mt-1 text-sm text-gray-500">
-                                {safeNumber(item.quantity)} x{" "}
-                                {formatEUR(safeNumber(item.unit_price))}
-                              </div>
-                            </div>
-
-                            <div className="shrink-0 font-semibold text-gray-900">
-                              {formatEUR(lineTotal)}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {(openOrder.order_items ?? []).length === 0 && (
-                        <div className="p-4 text-gray-600">—</div>
-                      )}
-                    </div>
-
-                    <div className="mt-5 flex justify-end">
-                      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex justify-between text-sm text-gray-700">
-                          <span>Subtotal</span>
-                          <span>{formatEUR(getSubtotal(openOrder))}</span>
-                        </div>
-
-                        <div className="mt-2 flex justify-between text-sm text-gray-700">
-                          <span>Envío</span>
-                          <span>
-                            {formatEUR(safeNumber(openOrder.shipping_amount))}
-                          </span>
-                        </div>
-
-                        <div className="mt-3 border-t pt-3">
-                          <div className="flex justify-between text-base font-bold text-gray-900">
-                            <span>Total</span>
-                            <span>
-                              {formatEUR(safeNumber(openOrder.total_amount))}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <p className="mt-4 text-xs leading-relaxed text-gray-500">
-                      Nota: “Descargar resumen PDF” genera un recibo/resumen del
-                      pedido. Para una factura legal completa deberías usar la
-                      factura emitida en tu sistema de facturación y guardarla en{" "}
-                      <code>invoices.pdf_url</code>.
-                    </p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void sendPasswordResetEmail()
+                    }
+                    disabled={
+                      sendingPasswordEmail
+                    }
+                    className="mt-6 rounded-xl bg-[#425530] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:opacity-50"
+                  >
+                    {sendingPasswordEmail
+                      ? "Enviando correo…"
+                      : "Enviar enlace para cambiar contraseña"}
+                  </button>
                 </div>
-              )}
-            </section>
+              </section>
+            )}
           </div>
         </div>
       </div>
-    </main>
+    </section>
   );
 }

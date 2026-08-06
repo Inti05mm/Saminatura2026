@@ -1,13 +1,16 @@
-import { useEffect, useState, createContext } from "react";
+import {
+  createContext,
+  useEffect,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "../supabaseClient";
 
-type SupaUser = any;
-
 interface UserContextType {
-  user: SupaUser | null;
-  setUser: (user: SupaUser | null) => void;
-  initializing: boolean; // 👈 para saber si ya cargó la sesión
+  user: User | null;
+  setUser: (user: User | null) => void;
+  initializing: boolean;
 }
 
 export const UserContext = createContext<UserContextType>({
@@ -19,15 +22,19 @@ export const UserContext = createContext<UserContextType>({
 function clearSupabaseStorage() {
   try {
     Object.keys(localStorage)
-      .filter((k) => k.startsWith("sb-"))
-      .forEach((k) => localStorage.removeItem(k));
+      .filter((key) => key.startsWith("sb-"))
+      .forEach((key) => localStorage.removeItem(key));
   } catch {
-    // ignore
+    // No hacemos nada si localStorage no está disponible.
   }
 }
 
-export const UserProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<SupaUser | null>(null);
+export function UserProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [user, setUser] = useState<User | null>(null);
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
@@ -35,35 +42,56 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     const bootstrap = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        const { data, error } =
+          await supabase.auth.getSession();
 
-        if (!ignore) setUser(data.session?.user ?? null);
+        if (error) {
+          throw error;
+        }
+
+        if (!ignore) {
+          setUser(data.session?.user ?? null);
+        }
       } catch {
-        // Si hay token roto en localStorage, resetea
         await supabase.auth.signOut().catch(() => {});
         clearSupabaseStorage();
-        if (!ignore) setUser(null);
+
+        if (!ignore) {
+          setUser(null);
+        }
       } finally {
-        if (!ignore) setInitializing(false);
+        if (!ignore) {
+          setInitializing(false);
+        }
       }
     };
 
-    bootstrap();
+    void bootstrap();
 
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+        setInitializing(false);
+      }
+    );
 
     return () => {
       ignore = true;
-      data.subscription.unsubscribe();
+      subscription.unsubscribe();
     };
   }, []);
 
   return (
-    <UserContext.Provider value={{ user, setUser, initializing }}>
+    <UserContext.Provider
+      value={{
+        user,
+        setUser,
+        initializing,
+      }}
+    >
       {children}
     </UserContext.Provider>
   );
-};
+}

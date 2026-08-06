@@ -88,7 +88,7 @@ export default function UserPedidos() {
 
     const { data: auth, error: uErr } = await supabase.auth.getUser();
     if (uErr || !auth?.user) {
-      navigate("/login");
+      navigate("/usuario");
       return;
     }
 
@@ -212,7 +212,7 @@ export default function UserPedidos() {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => navigate("/profile")}
+                  onClick={() => navigate("/perfil")}
                   className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
                 >
                   Volver al perfil
