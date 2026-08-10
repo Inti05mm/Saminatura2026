@@ -895,7 +895,7 @@ const Header: React.FC<{ title?: string }> = ({
                   md:px-6
                 "
               >
-                INICIO
+                Inicio
               </Link>
 
               <Link
@@ -911,7 +911,7 @@ const Header: React.FC<{ title?: string }> = ({
                   md:px-6
                 "
               >
-                COMPRAR
+                Comprar
               </Link>
 
               <Link
@@ -927,7 +927,7 @@ const Header: React.FC<{ title?: string }> = ({
                   md:px-6
                 "
               >
-                NOSOTROS
+                Nosotros
               </Link>
             </nav>
           ) : (
@@ -1283,7 +1283,7 @@ const Header: React.FC<{ title?: string }> = ({
                   xl:px-5
                 "
               >
-                INICIO
+                Inicio
               </Link>
 
               <Link
@@ -1299,7 +1299,7 @@ const Header: React.FC<{ title?: string }> = ({
                   xl:px-5
                 "
               >
-                COMPRAR
+                Comprar
               </Link>
 
               <Link
@@ -1315,7 +1315,7 @@ const Header: React.FC<{ title?: string }> = ({
                   xl:px-5
                 "
               >
-                NOSOTROS
+                Nosotros
               </Link>
             </nav>
           )}

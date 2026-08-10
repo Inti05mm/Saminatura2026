@@ -254,20 +254,58 @@ export default function CartPage() {
         return;
       }
 
+      // 1) Cargamos los datos públicos del producto.
+      // No pedimos vat_rate aquí porque public_products puede no exponerlo.
       const { data, error } = await supabase
-.from("public_products")
-.select("id,slug,name,brand,price,img,stock,flavor,size")
+        .from("public_products")
+        .select("id,slug,name,brand,price,img,stock,flavor,size")
         .in("id", missing);
 
       if (!alive) return;
 
-      if (!error && data) {
-        setProductById((prev) => {
-          const next = { ...prev };
-          for (const row of data as any[]) next[Number(row.id)] = row as Product;
-          return next;
-        });
+      if (error) {
+        console.error("Error cargando productos del carrito:", error.message);
+        setInitialLoading(false);
+        return;
       }
+
+      if (!data) {
+        setInitialLoading(false);
+        return;
+      }
+
+      // 2) Intentamos cargar el IVA desde products por separado.
+      // Si esta consulta falla, la cesta sigue funcionando igualmente.
+      const { data: vatRows, error: vatError } = await supabase
+        .from("products")
+        .select("id,vat_rate")
+        .in("id", missing);
+
+      if (!alive) return;
+
+      if (vatError) {
+        console.warn("No se pudo cargar vat_rate:", vatError.message);
+      }
+
+      const vatById = new Map<number, number | null>();
+      for (const row of vatRows ?? []) {
+        vatById.set(
+          Number(row.id),
+          row.vat_rate == null ? null : Number(row.vat_rate)
+        );
+      }
+
+      setProductById((prev) => {
+        const next = { ...prev };
+        for (const row of data as any[]) {
+          const id = Number(row.id);
+          next[id] = {
+            ...(row as Product),
+            vat_rate: vatById.get(id) ?? null,
+          };
+        }
+        return next;
+      });
 
       setInitialLoading(false);
     };
@@ -846,7 +884,7 @@ export default function CartPage() {
     return (
       <section className="w-full bg-white dark:bg-[#0A2025] py-9 px-8">
         <h1 className="text-center text-[#191919] dark:text-white text-[32px] font-semibold leading-[38px]">
-          My Shopping Cart
+          Mi carrito
         </h1>
         <p className="text-center mt-10 text-gray-600 dark:text-gray-200">Cargando cesta…</p>
       </section>
@@ -857,7 +895,7 @@ export default function CartPage() {
     return (
       <section className="w-full bg-white dark:bg-[#0A2025] py-9 px-8">
         <h1 className="text-center text-[#191919] dark:text-white text-[32px] font-semibold leading-[38px]">
-          My Shopping Cart
+          Mi carrito
         </h1>
         <p className="text-center mt-10 text-gray-600 dark:text-gray-200">Tu cesta está vacía.</p>
         <div className="flex justify-center mt-6">
@@ -875,7 +913,7 @@ export default function CartPage() {
   return (
     <section className="w-full bg-white dark:bg-[#0A2025] py-9 px-8">
       <h1 className="text-center text-[#191919] dark:text-white text-[32px] font-semibold leading-[38px]">
-        My Shopping Cart
+        Mi carrito
       </h1>
 
       <div className="max-w-6xl mx-auto mt-6">
@@ -1389,29 +1427,31 @@ export default function CartPage() {
         <div className="w-full lg:w-[424px] bg-white rounded-lg p-6 border">
           <h2 className="text-[#191919] mb-2 text-xl font-medium leading-[30px]">Resumen</h2>
 
-          <div className="w-full py-3 justify-between items-center flex">
-            <span className="text-[#4c4c4c] text-base font-normal leading-normal">Total:</span>
-            <span className="text-[#191919] text-base font-semibold leading-tight">{formatEUR(total)}</span>
-          </div>
-
-          <div className="w-full py-3 shadow-[0px_1px_0px_0px_rgba(229,229,229,1.00)] justify-between items-center flex">
-            <span className="text-[#4c4c4c] text-sm font-normal leading-[21px]">Envío:</span>
-            <span className="text-[#191919] text-sm font-medium leading-[21px]">{formatEUR(shipping)}</span>
-          </div>
-
-          <div className="w-full py-3 shadow-[0px_1px_0px_0px_rgba(229,229,229,1.00)] justify-between items-center flex">
-            <span className="text-[#4c4c4c] text-sm font-normal leading-[21px]">Subtotal:</span>
+          <div className="w-full py-3 border-b border-gray-200 justify-between items-center flex">
+            <span className="text-[#4c4c4c] text-sm font-normal leading-[21px]">Subtotal productos:</span>
             <span className="text-[#191919] text-sm font-medium leading-[21px]">{formatEUR(subtotal)}</span>
           </div>
 
-          <div className="w-full py-3 shadow-[0px_1px_0px_0px_rgba(229,229,229,1.00)] justify-between items-center flex">
+          <div className="w-full py-3 border-b border-gray-200 justify-between items-center flex gap-4">
+            <span className="text-[#4c4c4c] text-sm font-normal leading-[21px]">Envío:</span>
+            <span className="text-[#191919] text-sm font-medium leading-[21px] text-right">
+              {step === "cart" ? "Se calcula en el siguiente paso" : formatEUR(shipping)}
+            </span>
+          </div>
+
+          <div className="w-full py-3 border-b border-gray-200 justify-between items-center flex">
             <span className="text-[#4c4c4c] text-sm font-normal leading-[21px]">Base imponible:</span>
             <span className="text-[#191919] text-sm font-medium leading-[21px]">{formatEUR(totalBase)}</span>
           </div>
 
-          <div className="w-full py-3 shadow-[0px_1px_0px_0px_rgba(229,229,229,1.00)] justify-between items-center flex">
+          <div className="w-full py-3 border-b border-gray-200 justify-between items-center flex">
             <span className="text-[#4c4c4c] text-sm font-normal leading-[21px]">IVA incluido:</span>
             <span className="text-[#191919] text-sm font-medium leading-[21px]">{formatEUR(totalVat)}</span>
+          </div>
+
+          <div className="w-full py-4 mt-1 justify-between items-center flex">
+            <span className="text-[#191919] text-lg font-semibold">TOTAL:</span>
+            <span className="text-[#191919] text-xl font-bold">{formatEUR(total)}</span>
           </div>
 
           {checkoutError && <p className="mt-3 text-sm text-red-600">{checkoutError}</p>}

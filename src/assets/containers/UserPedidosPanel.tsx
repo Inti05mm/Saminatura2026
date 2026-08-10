@@ -55,6 +55,37 @@ const formatEUR = (value: number) =>
     currency: "EUR",
   }).format(Number.isFinite(value) ? value : 0);
 
+
+const SAMINATURA_LOGO_URL =
+  "https://uayblnybdrhhmumudbea.supabase.co/storage/v1/object/public/publicPictures/logo_2.png";
+
+async function imageUrlToDataUrl(url: string) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`No se pudo cargar la imagen: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("No se pudo convertir la imagen."));
+      }
+    };
+
+    reader.onerror = () =>
+      reject(new Error("No se pudo leer la imagen."));
+
+    reader.readAsDataURL(blob);
+  });
+}
+
 function safeNumber(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -261,112 +292,359 @@ setOrders(enrichedRows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  const downloadOrderPdf = (order: OrderRow) => {
-    const doc = new jsPDF();
-    const left = 16;
-    let y = 18;
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("SAMINATURA", left, y);
-
-    y += 10;
-
-    doc.setFontSize(15);
-    doc.text("Resumen de pedido", left, y);
-
-    y += 10;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-
-    const basicLines = [
-      `Pedido: ${order.id}`,
-      `Estado: ${statusLabel(order.status)}`,
-      `Fecha: ${formatDate(order.created_at)}`,
-      `Cliente: ${order.customer_name ?? "—"}`,
-      `Correo: ${order.customer_email ?? "—"}`,
-      `Teléfono: ${order.customer_phone ?? "—"}`,
-      `Envío: ${order.shipping_method ?? "—"}`,
-      `Dirección: ${buildShippingText(
-        order.shipping_address
-      )}`,
-    ];
-
-    basicLines.forEach((line) => {
-      const lines = doc.splitTextToSize(line, 178);
-      doc.text(lines, left, y);
-      y += lines.length * 5;
+  const downloadOrderPdf = async (order: OrderRow) => {
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
     });
 
-    y += 4;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    const margin = 16;
+    const contentWidth = pageWidth - margin * 2;
+
+    const colors = {
+      green: [66, 85, 48] as [number, number, number],
+      greenDark: [38, 52, 31] as [number, number, number],
+      greenSoft: [243, 246, 239] as [number, number, number],
+      cream: [249, 247, 241] as [number, number, number],
+      border: [220, 226, 215] as [number, number, number],
+      text: [43, 54, 37] as [number, number, number],
+      muted: [111, 123, 103] as [number, number, number],
+      white: [255, 255, 255] as [number, number, number],
+    };
+
+    let y = 14;
+
+    const addFooter = () => {
+      const totalPages = doc.getNumberOfPages();
+
+      for (let page = 1; page <= totalPages; page++) {
+        doc.setPage(page);
+
+        doc.setDrawColor(...colors.border);
+        doc.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(...colors.muted);
+
+        doc.text(
+          "SAMINATURA · Natural · Bio · Bienestar",
+          margin,
+          pageHeight - 8
+        );
+
+        doc.text(
+          `Página ${page} de ${totalPages}`,
+          pageWidth - margin,
+          pageHeight - 8,
+          { align: "right" }
+        );
+      }
+    };
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed <= pageHeight - 22) return;
+
+      doc.addPage();
+      y = 18;
+    };
+
+    // =========================
+    // CABECERA CORPORATIVA
+    // =========================
+    doc.setFillColor(...colors.cream);
+    doc.roundedRect(margin, y, contentWidth, 34, 4, 4, "F");
+
+    try {
+      const logoDataUrl = await imageUrlToDataUrl(SAMINATURA_LOGO_URL);
+      doc.addImage(logoDataUrl, "PNG", margin + 6, y + 6, 42, 18);
+    } catch (logoError) {
+      console.warn("No se pudo cargar el logo en el PDF:", logoError);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(...colors.green);
+      doc.text("SAMINATURA", margin + 6, y + 16);
+    }
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text("Artículos", left, y);
-
-    y += 7;
+    doc.setTextColor(...colors.greenDark);
+    doc.text("RESUMEN DE PEDIDO", pageWidth - margin - 6, y + 13, {
+      align: "right",
+    });
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+    doc.setFontSize(8.5);
+    doc.setTextColor(...colors.muted);
+    doc.text("Gracias por confiar en nosotros", pageWidth - margin - 6, y + 20, {
+      align: "right",
+    });
+
+    y += 43;
+
+    // =========================
+    // PEDIDO + ESTADO
+    // =========================
+    const shortOrderId = order.id.slice(0, 8).toUpperCase();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(...colors.greenDark);
+    doc.text(`Pedido #${shortOrderId}`, margin, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...colors.muted);
+    doc.text(`Referencia completa: ${order.id}`, margin, y + 6);
+
+    const statusText = statusLabel(order.status).toUpperCase();
+    const statusWidth = doc.getTextWidth(statusText) + 10;
+
+    if (order.status === "paid") {
+      doc.setFillColor(232, 242, 226);
+      doc.setTextColor(70, 102, 58);
+    } else if (order.status === "pending") {
+      doc.setFillColor(255, 247, 224);
+      doc.setTextColor(154, 102, 24);
+    } else {
+      doc.setFillColor(254, 235, 235);
+      doc.setTextColor(166, 55, 55);
+    }
+
+    doc.roundedRect(
+      pageWidth - margin - statusWidth,
+      y - 6,
+      statusWidth,
+      9,
+      4,
+      4,
+      "F"
+    );
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(statusText, pageWidth - margin - statusWidth / 2, y, {
+      align: "center",
+    });
+
+    y += 17;
+
+    // =========================
+    // DATOS DEL CLIENTE / ENVÍO
+    // =========================
+    const cardGap = 5;
+    const cardWidth = (contentWidth - cardGap) / 2;
+    const cardHeight = 43;
+
+    doc.setFillColor(...colors.greenSoft);
+    doc.roundedRect(margin, y, cardWidth, cardHeight, 3, 3, "F");
+    doc.roundedRect(
+      margin + cardWidth + cardGap,
+      y,
+      cardWidth,
+      cardHeight,
+      3,
+      3,
+      "F"
+    );
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...colors.greenDark);
+    doc.text("DATOS DEL CLIENTE", margin + 5, y + 8);
+    doc.text(
+      "ENTREGA",
+      margin + cardWidth + cardGap + 5,
+      y + 8
+    );
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...colors.text);
+
+    const customerLines = [
+      order.customer_name ?? "—",
+      order.customer_email ?? "—",
+      order.customer_phone ?? "—",
+      `Fecha: ${formatDate(order.paid_at ?? order.created_at)}`,
+    ];
+
+    customerLines.forEach((line, index) => {
+      doc.text(String(line), margin + 5, y + 16 + index * 6);
+    });
+
+    const shippingX = margin + cardWidth + cardGap + 5;
+
+    doc.text(
+      `Método: ${order.shipping_method ?? "—"}`,
+      shippingX,
+      y + 16
+    );
+
+    const addressLines = doc.splitTextToSize(
+      buildShippingText(order.shipping_address),
+      cardWidth - 10
+    );
+
+    doc.text(addressLines, shippingX, y + 23);
+
+    y += cardHeight + 10;
+
+    // =========================
+    // ARTÍCULOS
+    // =========================
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...colors.greenDark);
+    doc.text("ARTÍCULOS", margin, y);
+
+    y += 6;
+
+    doc.setFillColor(...colors.green);
+    doc.roundedRect(margin, y, contentWidth, 10, 2, 2, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...colors.white);
+
+    doc.text("PRODUCTO", margin + 4, y + 6.5);
+    doc.text("UDS.", 132, y + 6.5, { align: "center" });
+    doc.text("PRECIO", 159, y + 6.5, { align: "right" });
+    doc.text("TOTAL", pageWidth - margin - 4, y + 6.5, {
+      align: "right",
+    });
+
+    y += 15;
 
     const items = order.order_items ?? [];
 
     if (items.length === 0) {
-      doc.text("No hay artículos registrados.", left, y);
-      y += 7;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...colors.muted);
+      doc.text("No hay artículos registrados.", margin + 4, y);
+      y += 10;
     } else {
-      items.forEach((item) => {
-        if (y > 270) {
-          doc.addPage();
-          y = 18;
+      items.forEach((item, index) => {
+        const quantity = safeNumber(item.quantity);
+        const unitPrice = safeNumber(item.unit_price);
+        const rowTotal = unitPrice * quantity;
+
+        const productLines = doc.splitTextToSize(
+          item.product_name || "Producto",
+          86
+        );
+
+        const rowHeight = Math.max(13, productLines.length * 5 + 5);
+
+        ensureSpace(rowHeight + 4);
+
+        if (index % 2 === 0) {
+          doc.setFillColor(...colors.cream);
+          doc.roundedRect(margin, y - 4, contentWidth, rowHeight, 1.5, 1.5, "F");
         }
 
-        const total =
-          safeNumber(item.unit_price) *
-          safeNumber(item.quantity);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.8);
+        doc.setTextColor(...colors.text);
+        doc.text(productLines, margin + 4, y + 2);
 
-        const line = `${item.quantity} x ${
-          item.product_name
-        } · ${formatEUR(total)}`;
+        doc.setTextColor(...colors.muted);
+        doc.text(String(quantity), 132, y + 2, { align: "center" });
+        doc.text(formatEUR(unitPrice), 159, y + 2, { align: "right" });
 
-        const lines = doc.splitTextToSize(line, 178);
-        doc.text(lines, left, y);
-        y += lines.length * 5;
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...colors.greenDark);
+        doc.text(formatEUR(rowTotal), pageWidth - margin - 4, y + 2, {
+          align: "right",
+        });
+
+        y += rowHeight;
       });
     }
 
-    y += 6;
+    y += 5;
+
+    // =========================
+    // TOTALES
+    // =========================
+    ensureSpace(52);
+
+    const subtotal = getSubtotal(order);
+    const shipping = safeNumber(order.shipping_amount);
+    const total = safeNumber(order.total_amount);
+
+    const totalsWidth = 78;
+    const totalsX = pageWidth - margin - totalsWidth;
+
+    doc.setFillColor(...colors.greenSoft);
+    doc.roundedRect(totalsX, y, totalsWidth, 39, 3, 3, "F");
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...colors.muted);
+
+    doc.text("Subtotal", totalsX + 6, y + 9);
+    doc.text(formatEUR(subtotal), pageWidth - margin - 6, y + 9, {
+      align: "right",
+    });
+
+    doc.text("Envío", totalsX + 6, y + 17);
+    doc.text(formatEUR(shipping), pageWidth - margin - 6, y + 17, {
+      align: "right",
+    });
+
+    doc.setDrawColor(...colors.border);
+    doc.line(totalsX + 6, y + 23, pageWidth - margin - 6, y + 23);
 
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...colors.greenDark);
+
+    doc.text("TOTAL", totalsX + 6, y + 32);
+    doc.text(formatEUR(total), pageWidth - margin - 6, y + 32, {
+      align: "right",
+    });
+
+    y += 49;
+
+    // =========================
+    // INFORMACIÓN POSTVENTA
+    // =========================
+    ensureSpace(38);
+
+    doc.setFillColor(...colors.cream);
+    doc.roundedRect(margin, y, contentWidth, 31, 3, 3, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...colors.greenDark);
+    doc.text("¿NECESITAS AYUDA CON TU PEDIDO?", margin + 5, y + 8);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...colors.muted);
+
     doc.text(
-      `Subtotal: ${formatEUR(getSubtotal(order))}`,
-      left,
-      y
+      "Email: saminatura369@gmail.com  ·  Teléfono: +34 631 415 075",
+      margin + 5,
+      y + 15
     );
 
-    y += 6;
+    const legalText =
+      "Consulta en nuestra web las condiciones de compra, envío, desistimiento, devoluciones y política de privacidad.";
 
-    doc.text(
-      `Envío: ${formatEUR(
-        safeNumber(order.shipping_amount)
-      )}`,
-      left,
-      y
-    );
+    const legalLines = doc.splitTextToSize(legalText, contentWidth - 10);
+    doc.text(legalLines, margin + 5, y + 22);
 
-    y += 7;
+    addFooter();
 
-    doc.setFontSize(12);
-    doc.text(
-      `Total: ${formatEUR(
-        safeNumber(order.total_amount)
-      )}`,
-      left,
-      y
-    );
-
-    doc.save(`pedido-saminatura-${order.id}.pdf`);
+    doc.save(`pedido-saminatura-${shortOrderId}.pdf`);
   };
 
   if (loading) {
@@ -514,7 +792,7 @@ setOrders(enrichedRows);
                     <button
                       type="button"
                       onClick={() =>
-                        downloadOrderPdf(openOrder)
+                        void downloadOrderPdf(openOrder)
                       }
                       className="rounded-xl bg-[#425530] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#344526]"
                     >
