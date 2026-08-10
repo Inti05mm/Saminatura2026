@@ -7,6 +7,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { useUser } from "./useUser";
 import UserPedidosPanel from "./UserPedidosPanel";
+import UserReturnsPanel from "./UserReturnsPanel";
+
 import {
   importLibrary,
   setOptions,
@@ -16,6 +18,7 @@ type ProfileSection =
   | "datos"
   | "direcciones"
   | "pedidos"
+  | "devoluciones"
   | "seguridad";
 
 type ProfileForm = {
@@ -84,7 +87,10 @@ const GOOGLE_MAPS_API_KEY =
 let googleMapsConfigured = false;
 
 function configureGoogleMaps() {
-  if (googleMapsConfigured || !GOOGLE_MAPS_API_KEY) {
+  if (
+    googleMapsConfigured ||
+    !GOOGLE_MAPS_API_KEY
+  ) {
     return;
   }
 
@@ -103,9 +109,10 @@ function getAddressComponent(
   type: string,
   useShortName = false
 ) {
-  const component = components.find((item) =>
-    item.types.includes(type)
-  );
+  const component =
+    components.find((item) =>
+      item.types.includes(type)
+    );
 
   if (!component) return "";
 
@@ -123,8 +130,13 @@ export default function UserProfile() {
     initializing,
   } = useUser();
 
-  const [activeSection, setActiveSection] =
-    useState<ProfileSection>("datos");
+  const [
+    activeSection,
+    setActiveSection,
+  ] =
+    useState<ProfileSection>(
+      "datos"
+    );
 
   const [profile, setProfile] =
     useState<ProfileForm>({
@@ -133,42 +145,68 @@ export default function UserProfile() {
       phone: "",
     });
 
-  const [addresses, setAddresses] =
-    useState<AddressRow[]>([]);
+  const [
+    addresses,
+    setAddresses,
+  ] = useState<AddressRow[]>([]);
 
-  const [addressForm, setAddressForm] =
-    useState<AddressForm>(emptyAddress);
-
+  const [
+    addressForm,
+    setAddressForm,
+  ] =
+    useState<AddressForm>(
+      emptyAddress
+    );
 
   const addressAutocompleteInputRef =
-    useRef<HTMLInputElement | null>(null);
+    useRef<HTMLInputElement | null>(
+      null
+    );
 
   const autocompleteInstanceRef =
-    useRef<google.maps.places.Autocomplete | null>(null);
+    useRef<google.maps.places.Autocomplete | null>(
+      null
+    );
 
   const [mapsError, setMapsError] =
     useState<string | null>(null);
 
-  const [editingAddressId, setEditingAddressId] =
+  const [
+    editingAddressId,
+    setEditingAddressId,
+  ] =
     useState<string | null>(null);
 
-  const [showAddressForm, setShowAddressForm] =
-    useState(false);
+  const [
+    showAddressForm,
+    setShowAddressForm,
+  ] = useState(false);
 
-  const [loadingProfile, setLoadingProfile] =
-    useState(true);
+  const [
+    loadingProfile,
+    setLoadingProfile,
+  ] = useState(true);
 
-  const [savingProfile, setSavingProfile] =
-    useState(false);
+  const [
+    savingProfile,
+    setSavingProfile,
+  ] = useState(false);
 
-  const [savingAddress, setSavingAddress] =
-    useState(false);
+  const [
+    savingAddress,
+    setSavingAddress,
+  ] = useState(false);
 
-  const [deletingAddressId, setDeletingAddressId] =
+  const [
+    deletingAddressId,
+    setDeletingAddressId,
+  ] =
     useState<string | null>(null);
 
-  const [sendingPasswordEmail, setSendingPasswordEmail] =
-    useState(false);
+  const [
+    sendingPasswordEmail,
+    setSendingPasswordEmail,
+  ] = useState(false);
 
   const [notice, setNotice] =
     useState<Notice>(null);
@@ -189,72 +227,89 @@ export default function UserProfile() {
       setLoadingProfile(true);
       setNotice(null);
 
-      const [profileResult, addressesResult] =
-        await Promise.all([
-          supabase
-            .from("profiles")
-            .select(
-              `
-                first_name,
-                last_name,
-                phone
-              `
-            )
-            .eq("id", user.id)
-            .maybeSingle(),
+      const [
+        profileResult,
+        addressesResult,
+      ] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select(
+            `
+              first_name,
+              last_name,
+              phone
+            `
+          )
+          .eq("id", user.id)
+          .maybeSingle(),
 
-          supabase
-            .from("user_addresses")
-            .select("*")
-            .eq("user_id", user.id)
-            .order("is_default", {
-              ascending: false,
-            })
-            .order("created_at", {
-              ascending: true,
-            }),
-        ]);
+        supabase
+          .from("user_addresses")
+          .select("*")
+          .eq(
+            "user_id",
+            user.id
+          )
+          .order("is_default", {
+            ascending: false,
+          })
+          .order("created_at", {
+            ascending: true,
+          }),
+      ]);
 
       if (!alive) return;
 
-      if (profileResult.error) {
+      if (
+        profileResult.error
+      ) {
         setNotice({
           type: "error",
           message:
             "No se han podido cargar tus datos: " +
-            profileResult.error.message,
+            profileResult.error
+              .message,
         });
       }
 
       setProfile({
         first_name:
-          profileResult.data?.first_name ??
+          profileResult.data
+            ?.first_name ??
           String(
-            user.user_metadata?.first_name ?? ""
+            user.user_metadata
+              ?.first_name ?? ""
           ),
 
         last_name:
-          profileResult.data?.last_name ??
+          profileResult.data
+            ?.last_name ??
           String(
-            user.user_metadata?.last_name ?? ""
+            user.user_metadata
+              ?.last_name ?? ""
           ),
 
         phone:
-          profileResult.data?.phone ?? "",
+          profileResult.data
+            ?.phone ?? "",
       });
 
-      if (addressesResult.error) {
+      if (
+        addressesResult.error
+      ) {
         setNotice({
           type: "error",
           message:
             "No se han podido cargar tus direcciones: " +
-            addressesResult.error.message,
+            addressesResult.error
+              .message,
         });
 
         setAddresses([]);
       } else {
         setAddresses(
-          (addressesResult.data ?? []) as AddressRow[]
+          (addressesResult.data ??
+            []) as AddressRow[]
         );
       }
 
@@ -272,11 +327,13 @@ export default function UserProfile() {
     user,
   ]);
 
-
   useEffect(() => {
-    if (!showAddressForm) return;
+    if (!showAddressForm) {
+      return;
+    }
 
-    const input = addressAutocompleteInputRef.current;
+    const input =
+      addressAutocompleteInputRef.current;
 
     if (!input) return;
 
@@ -284,6 +341,7 @@ export default function UserProfile() {
       setMapsError(
         "Falta configurar VITE_GOOGLE_MAPS_API_KEY en el archivo .env."
       );
+
       return;
     }
 
@@ -293,150 +351,187 @@ export default function UserProfile() {
 
     let cancelled = false;
 
-    const initializeAutocomplete = async () => {
-      try {
-        configureGoogleMaps();
+    const initializeAutocomplete =
+      async () => {
+        try {
+          configureGoogleMaps();
 
-        const placesLibrary =
-          (await importLibrary(
-            "places"
-          )) as google.maps.PlacesLibrary;
+          const placesLibrary =
+            (await importLibrary(
+              "places"
+            )) as google.maps.PlacesLibrary;
 
-        if (cancelled) return;
+          if (cancelled) return;
 
-        const autocomplete =
-          new placesLibrary.Autocomplete(input, {
-            fields: [
-              "address_components",
-              "formatted_address",
-              "name",
-            ],
-            types: ["address"],
-            componentRestrictions: {
-              country: "es",
-            },
-          });
+          const autocomplete =
+            new placesLibrary.Autocomplete(
+              input,
+              {
+                fields: [
+                  "address_components",
+                  "formatted_address",
+                  "name",
+                ],
 
-        autocompleteInstanceRef.current =
-          autocomplete;
+                types: [
+                  "address",
+                ],
 
-        listener = autocomplete.addListener(
-          "place_changed",
-          () => {
-            const place = autocomplete.getPlace();
-            const components =
-              place.address_components ?? [];
-
-            if (components.length === 0) {
-              setMapsError(
-                "Selecciona una dirección de la lista de Google para completar los campos."
-              );
-              return;
-            }
-
-            const streetNumber =
-              getAddressComponent(
-                components,
-                "street_number"
-              );
-
-            const route = getAddressComponent(
-              components,
-              "route"
+                componentRestrictions:
+                  {
+                    country:
+                      "es",
+                  },
+              }
             );
 
-            const addressLine1 = [
-              route,
-              streetNumber,
-            ]
-              .filter(Boolean)
-              .join(" ");
+          autocompleteInstanceRef.current =
+            autocomplete;
 
-            const selectedAddress =
-              addressLine1 ||
-              place.name ||
-              input.value;
+          listener =
+            autocomplete.addListener(
+              "place_changed",
+              () => {
+                const place =
+                  autocomplete.getPlace();
 
-            input.value = selectedAddress;
+                const components =
+                  place.address_components ??
+                  [];
 
-            const subpremise =
-              getAddressComponent(
-                components,
-                "subpremise"
-              );
+                if (
+                  components.length ===
+                  0
+                ) {
+                  setMapsError(
+                    "Selecciona una dirección de la lista de Google para completar los campos."
+                  );
 
-            const postalCode =
-              getAddressComponent(
-                components,
-                "postal_code"
-              );
+                  return;
+                }
 
-            const city =
-              getAddressComponent(
-                components,
-                "locality"
-              ) ||
-              getAddressComponent(
-                components,
-                "postal_town"
-              ) ||
-              getAddressComponent(
-                components,
-                "administrative_area_level_3"
-              );
+                const streetNumber =
+                  getAddressComponent(
+                    components,
+                    "street_number"
+                  );
 
-            const region =
-              getAddressComponent(
-                components,
-                "administrative_area_level_2"
-              ) ||
-              getAddressComponent(
-                components,
-                "administrative_area_level_1"
-              );
+                const route =
+                  getAddressComponent(
+                    components,
+                    "route"
+                  );
 
-            const country =
-              getAddressComponent(
-                components,
-                "country"
-              );
+                const addressLine1 =
+                  [
+                    route,
+                    streetNumber,
+                  ]
+                    .filter(
+                      Boolean
+                    )
+                    .join(" ");
 
-            setAddressForm((current) => ({
-              ...current,
-              address_line1:
-                selectedAddress ||
-                current.address_line1,
-              address_line2:
-                subpremise ||
-                current.address_line2,
-              postal_code:
-                postalCode ||
-                current.postal_code,
-              city: city || current.city,
-              region:
-                region || current.region,
-              country:
-                country || current.country,
-            }));
+                const selectedAddress =
+                  addressLine1 ||
+                  place.name ||
+                  input.value;
 
-            setMapsError(null);
-          }
-        );
+                input.value =
+                  selectedAddress;
 
-        setMapsError(null);
-      } catch (error) {
-        console.error(
-          "Error cargando Google Places:",
-          error
-        );
+                const subpremise =
+                  getAddressComponent(
+                    components,
+                    "subpremise"
+                  );
 
-        if (!cancelled) {
-          setMapsError(
-            "No se ha podido cargar el buscador de direcciones de Google. Revisa la API key y las APIs activadas."
+                const postalCode =
+                  getAddressComponent(
+                    components,
+                    "postal_code"
+                  );
+
+                const city =
+                  getAddressComponent(
+                    components,
+                    "locality"
+                  ) ||
+                  getAddressComponent(
+                    components,
+                    "postal_town"
+                  ) ||
+                  getAddressComponent(
+                    components,
+                    "administrative_area_level_3"
+                  );
+
+                const region =
+                  getAddressComponent(
+                    components,
+                    "administrative_area_level_2"
+                  ) ||
+                  getAddressComponent(
+                    components,
+                    "administrative_area_level_1"
+                  );
+
+                const country =
+                  getAddressComponent(
+                    components,
+                    "country"
+                  );
+
+                setAddressForm(
+                  (current) => ({
+                    ...current,
+
+                    address_line1:
+                      selectedAddress ||
+                      current.address_line1,
+
+                    address_line2:
+                      subpremise ||
+                      current.address_line2,
+
+                    postal_code:
+                      postalCode ||
+                      current.postal_code,
+
+                    city:
+                      city ||
+                      current.city,
+
+                    region:
+                      region ||
+                      current.region,
+
+                    country:
+                      country ||
+                      current.country,
+                  })
+                );
+
+                setMapsError(
+                  null
+                );
+              }
+            );
+
+          setMapsError(null);
+        } catch (error) {
+          console.error(
+            "Error cargando Google Places:",
+            error
           );
+
+          if (!cancelled) {
+            setMapsError(
+              "No se ha podido cargar el buscador de direcciones de Google. Revisa la API key y las APIs activadas."
+            );
+          }
         }
-      }
-    };
+      };
 
     void initializeAutocomplete();
 
@@ -447,42 +542,51 @@ export default function UserProfile() {
         listener.remove();
       }
 
-      autocompleteInstanceRef.current = null;
+      autocompleteInstanceRef.current =
+        null;
     };
   }, [
     editingAddressId,
     showAddressForm,
   ]);
 
-  const reloadAddresses = async () => {
-    if (!user) return;
+  const reloadAddresses =
+    async () => {
+      if (!user) return;
 
-    const { data, error } = await supabase
-      .from("user_addresses")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("is_default", {
-        ascending: false,
-      })
-      .order("created_at", {
-        ascending: true,
-      });
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("user_addresses")
+        .select("*")
+        .eq(
+          "user_id",
+          user.id
+        )
+        .order("is_default", {
+          ascending: false,
+        })
+        .order("created_at", {
+          ascending: true,
+        });
 
-    if (error) {
-      setNotice({
-        type: "error",
-        message:
-          "No se han podido actualizar las direcciones: " +
-          error.message,
-      });
+      if (error) {
+        setNotice({
+          type: "error",
+          message:
+            "No se han podido actualizar las direcciones: " +
+            error.message,
+        });
 
-      return;
-    }
+        return;
+      }
 
-    setAddresses(
-      (data ?? []) as AddressRow[]
-    );
-  };
+      setAddresses(
+        (data ??
+          []) as AddressRow[]
+      );
+    };
 
   const changeSection = (
     section: ProfileSection
@@ -497,10 +601,12 @@ export default function UserProfile() {
     field: K,
     value: ProfileForm[K]
   ) => {
-    setProfile((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    setProfile(
+      (current) => ({
+        ...current,
+        [field]: value,
+      })
+    );
   };
 
   const updateAddressField = <
@@ -509,364 +615,496 @@ export default function UserProfile() {
     field: K,
     value: AddressForm[K]
   ) => {
-    setAddressForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    setAddressForm(
+      (current) => ({
+        ...current,
+        [field]: value,
+      })
+    );
   };
 
-  const openNewAddressForm = () => {
-    setEditingAddressId(null);
+  const openNewAddressForm =
+    () => {
+      setEditingAddressId(
+        null
+      );
 
-    setAddressForm({
-      ...emptyAddress,
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      phone: profile.phone,
-      is_default: addresses.length === 0,
-    });
+      setAddressForm({
+        ...emptyAddress,
 
-    setShowAddressForm(true);
-    setNotice(null);
-    setMapsError(null);
-  };
+        first_name:
+          profile.first_name,
+
+        last_name:
+          profile.last_name,
+
+        phone:
+          profile.phone,
+
+        is_default:
+          addresses.length ===
+          0,
+      });
+
+      setShowAddressForm(
+        true
+      );
+
+      setNotice(null);
+      setMapsError(null);
+    };
 
   const openEditAddressForm = (
     address: AddressRow
   ) => {
-    setEditingAddressId(address.id);
+    setEditingAddressId(
+      address.id
+    );
 
     setAddressForm({
-      label: address.label ?? "",
+      label:
+        address.label ?? "",
+
       first_name:
-        address.first_name ?? "",
+        address.first_name ??
+        "",
+
       last_name:
-        address.last_name ?? "",
-      phone: address.phone ?? "",
-      company: address.company ?? "",
+        address.last_name ??
+        "",
+
+      phone:
+        address.phone ?? "",
+
+      company:
+        address.company ?? "",
+
       address_line1:
         address.address_line1,
+
       address_line2:
-        address.address_line2 ?? "",
+        address.address_line2 ??
+        "",
+
       postal_code:
         address.postal_code,
-      city: address.city,
-      region: address.region ?? "",
+
+      city:
+        address.city,
+
+      region:
+        address.region ?? "",
+
       country:
-        address.country || "España",
-      is_default: address.is_default,
+        address.country ||
+        "España",
+
+      is_default:
+        address.is_default,
     });
 
-    setShowAddressForm(true);
+    setShowAddressForm(
+      true
+    );
+
     setNotice(null);
     setMapsError(null);
   };
 
-  const closeAddressForm = () => {
-    setShowAddressForm(false);
-    setEditingAddressId(null);
-    setAddressForm(emptyAddress);
-    setMapsError(null);
-  };
+  const closeAddressForm =
+    () => {
+      setShowAddressForm(
+        false
+      );
 
-  const savePersonalData = async () => {
-    if (!user) return;
+      setEditingAddressId(
+        null
+      );
 
-    setSavingProfile(true);
-    setNotice(null);
+      setAddressForm(
+        emptyAddress
+      );
 
-    const firstName =
-      profile.first_name.trim();
+      setMapsError(null);
+    };
 
-    const lastName =
-      profile.last_name.trim();
+  const savePersonalData =
+    async () => {
+      if (!user) return;
 
-    const phone =
-      profile.phone.trim();
+      setSavingProfile(true);
+      setNotice(null);
 
-    const { error: profileError } =
-      await supabase
+      const firstName =
+        profile.first_name.trim();
+
+      const lastName =
+        profile.last_name.trim();
+
+      const phone =
+        profile.phone.trim();
+
+      const {
+        error: profileError,
+      } = await supabase
         .from("profiles")
         .upsert(
           {
             id: user.id,
+
             first_name:
-              firstName || null,
+              firstName ||
+              null,
+
             last_name:
-              lastName || null,
+              lastName ||
+              null,
+
             phone:
-              phone || null,
+              phone ||
+              null,
+
             updated_at:
               new Date().toISOString(),
           },
           {
-            onConflict: "id",
+            onConflict:
+              "id",
           }
         );
 
-    if (profileError) {
+      if (profileError) {
+        setSavingProfile(
+          false
+        );
+
+        setNotice({
+          type: "error",
+          message:
+            "No se han podido guardar tus datos: " +
+            profileError.message,
+        });
+
+        return;
+      }
+
+      const {
+        data,
+        error: authError,
+      } =
+        await supabase.auth.updateUser(
+          {
+            data: {
+              first_name:
+                firstName,
+              last_name:
+                lastName,
+            },
+          }
+        );
+
       setSavingProfile(false);
 
+      if (authError) {
+        setNotice({
+          type: "error",
+          message:
+            "Los datos se guardaron en el perfil, pero no se pudieron actualizar en la cuenta: " +
+            authError.message,
+        });
+
+        return;
+      }
+
+      setUser(data.user);
+
       setNotice({
-        type: "error",
+        type: "success",
         message:
-          "No se han podido guardar tus datos: " +
-          profileError.message,
+          "Tus datos personales se han guardado correctamente.",
       });
-
-      return;
-    }
-
-    const {
-      data,
-      error: authError,
-    } = await supabase.auth.updateUser({
-      data: {
-        first_name: firstName,
-        last_name: lastName,
-      },
-    });
-
-    setSavingProfile(false);
-
-    if (authError) {
-      setNotice({
-        type: "error",
-        message:
-          "Los datos se guardaron en el perfil, pero no se pudieron actualizar en la cuenta: " +
-          authError.message,
-      });
-
-      return;
-    }
-
-    setUser(data.user);
-
-    setNotice({
-      type: "success",
-      message:
-        "Tus datos personales se han guardado correctamente.",
-    });
-  };
-
-  const saveAddress = async () => {
-    if (!user) return;
-
-    const addressLine1 =
-      addressForm.address_line1.trim();
-
-    const postalCode =
-      addressForm.postal_code.trim();
-
-    const city =
-      addressForm.city.trim();
-
-    const country =
-      addressForm.country.trim();
-
-    if (
-      !addressLine1 ||
-      !postalCode ||
-      !city ||
-      !country
-    ) {
-      setNotice({
-        type: "error",
-        message:
-          "Completa la dirección, el código postal, la localidad y el país.",
-      });
-
-      return;
-    }
-
-    setSavingAddress(true);
-    setNotice(null);
-
-    const payload = {
-      user_id: user.id,
-
-      label:
-        addressForm.label.trim() ||
-        null,
-
-      first_name:
-        addressForm.first_name.trim() ||
-        null,
-
-      last_name:
-        addressForm.last_name.trim() ||
-        null,
-
-      phone:
-        addressForm.phone.trim() ||
-        null,
-
-      company:
-        addressForm.company.trim() ||
-        null,
-
-      address_line1:
-        addressLine1,
-
-      address_line2:
-        addressForm.address_line2.trim() ||
-        null,
-
-      postal_code:
-        postalCode,
-
-      city,
-
-      region:
-        addressForm.region.trim() ||
-        null,
-
-      country,
-
-      is_default:
-        addresses.length === 0
-          ? true
-          : addressForm.is_default,
     };
 
-    const result = editingAddressId
-      ? await supabase
-          .from("user_addresses")
-          .update(payload)
-          .eq("id", editingAddressId)
-          .eq("user_id", user.id)
-      : await supabase
-          .from("user_addresses")
-          .insert(payload);
+  const saveAddress =
+    async () => {
+      if (!user) return;
 
-    setSavingAddress(false);
+      const addressLine1 =
+        addressForm.address_line1.trim();
 
-    if (result.error) {
+      const postalCode =
+        addressForm.postal_code.trim();
+
+      const city =
+        addressForm.city.trim();
+
+      const country =
+        addressForm.country.trim();
+
+      if (
+        !addressLine1 ||
+        !postalCode ||
+        !city ||
+        !country
+      ) {
+        setNotice({
+          type: "error",
+          message:
+            "Completa la dirección, el código postal, la localidad y el país.",
+        });
+
+        return;
+      }
+
+      setSavingAddress(true);
+      setNotice(null);
+
+      const payload = {
+        user_id: user.id,
+
+        label:
+          addressForm.label.trim() ||
+          null,
+
+        first_name:
+          addressForm.first_name.trim() ||
+          null,
+
+        last_name:
+          addressForm.last_name.trim() ||
+          null,
+
+        phone:
+          addressForm.phone.trim() ||
+          null,
+
+        company:
+          addressForm.company.trim() ||
+          null,
+
+        address_line1:
+          addressLine1,
+
+        address_line2:
+          addressForm.address_line2.trim() ||
+          null,
+
+        postal_code:
+          postalCode,
+
+        city,
+
+        region:
+          addressForm.region.trim() ||
+          null,
+
+        country,
+
+        is_default:
+          addresses.length === 0
+            ? true
+            : addressForm.is_default,
+      };
+
+      const result =
+        editingAddressId
+          ? await supabase
+              .from(
+                "user_addresses"
+              )
+              .update(
+                payload
+              )
+              .eq(
+                "id",
+                editingAddressId
+              )
+              .eq(
+                "user_id",
+                user.id
+              )
+          : await supabase
+              .from(
+                "user_addresses"
+              )
+              .insert(
+                payload
+              );
+
+      setSavingAddress(false);
+
+      if (result.error) {
+        setNotice({
+          type: "error",
+          message:
+            "No se ha podido guardar la dirección: " +
+            result.error
+              .message,
+        });
+
+        return;
+      }
+
+      await reloadAddresses();
+
+      closeAddressForm();
+
       setNotice({
-        type: "error",
+        type: "success",
         message:
-          "No se ha podido guardar la dirección: " +
-          result.error.message,
+          editingAddressId
+            ? "La dirección se ha actualizado correctamente."
+            : "La dirección se ha añadido correctamente.",
       });
+    };
 
-      return;
-    }
+  const setDefaultAddress =
+    async (
+      addressId: string
+    ) => {
+      if (!user) return;
 
-    await reloadAddresses();
-    closeAddressForm();
+      setNotice(null);
 
-    setNotice({
-      type: "success",
-      message: editingAddressId
-        ? "La dirección se ha actualizado correctamente."
-        : "La dirección se ha añadido correctamente.",
-    });
-  };
+      const { error } =
+        await supabase
+          .from(
+            "user_addresses"
+          )
+          .update({
+            is_default:
+              true,
+          })
+          .eq(
+            "id",
+            addressId
+          )
+          .eq(
+            "user_id",
+            user.id
+          );
 
-  const setDefaultAddress = async (
-    addressId: string
-  ) => {
-    if (!user) return;
+      if (error) {
+        setNotice({
+          type: "error",
+          message:
+            "No se ha podido marcar la dirección como principal: " +
+            error.message,
+        });
 
-    setNotice(null);
+        return;
+      }
 
-    const { error } = await supabase
-      .from("user_addresses")
-      .update({
-        is_default: true,
-      })
-      .eq("id", addressId)
-      .eq("user_id", user.id);
-
-    if (error) {
-      setNotice({
-        type: "error",
-        message:
-          "No se ha podido marcar la dirección como principal: " +
-          error.message,
-      });
-
-      return;
-    }
-
-    await reloadAddresses();
-
-    setNotice({
-      type: "success",
-      message:
-        "La dirección se ha establecido como principal.",
-    });
-  };
-
-  const deleteAddress = async (
-    address: AddressRow
-  ) => {
-    if (!user) return;
-
-    const confirmed = window.confirm(
-      "¿Quieres eliminar esta dirección?"
-    );
-
-    if (!confirmed) return;
-
-    setDeletingAddressId(address.id);
-    setNotice(null);
-
-    const { error } = await supabase
-      .from("user_addresses")
-      .delete()
-      .eq("id", address.id)
-      .eq("user_id", user.id);
-
-    if (error) {
-      setDeletingAddressId(null);
+      await reloadAddresses();
 
       setNotice({
-        type: "error",
+        type: "success",
         message:
-          "No se ha podido eliminar la dirección: " +
-          error.message,
+          "La dirección se ha establecido como principal.",
       });
+    };
 
-      return;
-    }
+  const deleteAddress =
+    async (
+      address: AddressRow
+    ) => {
+      if (!user) return;
 
-    const remainingAddresses =
-      addresses.filter(
-        (item) => item.id !== address.id
+      const confirmed =
+        window.confirm(
+          "¿Quieres eliminar esta dirección?"
+        );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setDeletingAddressId(
+        address.id
       );
 
-    if (
-      address.is_default &&
-      remainingAddresses.length > 0
-    ) {
-      await supabase
-        .from("user_addresses")
-        .update({
-          is_default: true,
-        })
-        .eq(
-          "id",
-          remainingAddresses[0].id
-        )
-        .eq("user_id", user.id);
-    }
+      setNotice(null);
 
-    setDeletingAddressId(null);
-    await reloadAddresses();
+      const { error } =
+        await supabase
+          .from(
+            "user_addresses"
+          )
+          .delete()
+          .eq(
+            "id",
+            address.id
+          )
+          .eq(
+            "user_id",
+            user.id
+          );
 
-    if (
-      editingAddressId === address.id
-    ) {
-      closeAddressForm();
-    }
+      if (error) {
+        setDeletingAddressId(
+          null
+        );
 
-    setNotice({
-      type: "success",
-      message:
-        "La dirección se ha eliminado correctamente.",
-    });
-  };
+        setNotice({
+          type: "error",
+          message:
+            "No se ha podido eliminar la dirección: " +
+            error.message,
+        });
+
+        return;
+      }
+
+      const remainingAddresses =
+        addresses.filter(
+          (item) =>
+            item.id !==
+            address.id
+        );
+
+      if (
+        address.is_default &&
+        remainingAddresses.length >
+          0
+      ) {
+        await supabase
+          .from(
+            "user_addresses"
+          )
+          .update({
+            is_default:
+              true,
+          })
+          .eq(
+            "id",
+            remainingAddresses[0]
+              .id
+          )
+          .eq(
+            "user_id",
+            user.id
+          );
+      }
+
+      setDeletingAddressId(
+        null
+      );
+
+      await reloadAddresses();
+
+      if (
+        editingAddressId ===
+        address.id
+      ) {
+        closeAddressForm();
+      }
+
+      setNotice({
+        type: "success",
+        message:
+          "La dirección se ha eliminado correctamente.",
+      });
+    };
 
   const sendPasswordResetEmail =
     async () => {
@@ -880,7 +1118,10 @@ export default function UserProfile() {
         return;
       }
 
-      setSendingPasswordEmail(true);
+      setSendingPasswordEmail(
+        true
+      );
+
       setNotice(null);
 
       const { error } =
@@ -891,7 +1132,9 @@ export default function UserProfile() {
           }
         );
 
-      setSendingPasswordEmail(false);
+      setSendingPasswordEmail(
+        false
+      );
 
       if (error) {
         setNotice({
@@ -940,7 +1183,8 @@ export default function UserProfile() {
     section: ProfileSection
   ) =>
     `w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
-      activeSection === section
+      activeSection ===
+      section
         ? "bg-white text-[#425530] shadow-sm"
         : "text-white/75 hover:bg-white/10 hover:text-white"
     }`;
@@ -954,6 +1198,7 @@ export default function UserProfile() {
         <div className="grid overflow-hidden rounded-[2rem] border border-[#d7dece] bg-white shadow-[0_22px_60px_rgba(49,65,34,0.14)] lg:grid-cols-[270px_minmax(0,1fr)]">
           <aside className="relative overflow-hidden bg-[#425530] p-6 text-white sm:p-7">
             <div className="pointer-events-none absolute -left-20 top-8 h-52 w-52 rounded-full bg-white/10 blur-3xl" />
+
             <div className="pointer-events-none absolute -bottom-20 -right-16 h-64 w-64 rounded-full bg-[#aabb98]/20 blur-3xl" />
 
             <div className="relative z-10">
@@ -973,9 +1218,13 @@ export default function UserProfile() {
                 <button
                   type="button"
                   onClick={() =>
-                    changeSection("datos")
+                    changeSection(
+                      "datos"
+                    )
                   }
-                  className={menuClass("datos")}
+                  className={menuClass(
+                    "datos"
+                  )}
                 >
                   Mis datos
                 </button>
@@ -983,7 +1232,9 @@ export default function UserProfile() {
                 <button
                   type="button"
                   onClick={() =>
-                    changeSection("direcciones")
+                    changeSection(
+                      "direcciones"
+                    )
                   }
                   className={menuClass(
                     "direcciones"
@@ -995,7 +1246,9 @@ export default function UserProfile() {
                 <button
                   type="button"
                   onClick={() =>
-                    changeSection("pedidos")
+                    changeSection(
+                      "pedidos"
+                    )
                   }
                   className={menuClass(
                     "pedidos"
@@ -1004,10 +1257,27 @@ export default function UserProfile() {
                   Mis pedidos
                 </button>
 
+                {/* NUEVO */}
                 <button
                   type="button"
                   onClick={() =>
-                    changeSection("seguridad")
+                    changeSection(
+                      "devoluciones"
+                    )
+                  }
+                  className={menuClass(
+                    "devoluciones"
+                  )}
+                >
+                  Devoluciones
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSection(
+                      "seguridad"
+                    )
                   }
                   className={menuClass(
                     "seguridad"
@@ -1031,7 +1301,8 @@ export default function UserProfile() {
             {notice && (
               <div
                 className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
-                  notice.type === "success"
+                  notice.type ===
+                  "success"
                     ? "border-[#cadabd] bg-[#f2f7ee] text-[#34502a]"
                     : "border-red-200 bg-red-50 text-red-700"
                 }`}
@@ -1040,7 +1311,8 @@ export default function UserProfile() {
               </div>
             )}
 
-            {activeSection === "datos" && (
+            {activeSection ===
+              "datos" && (
               <section>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7d8a70]">
                   Información personal
@@ -1069,13 +1341,18 @@ export default function UserProfile() {
                       value={
                         profile.first_name
                       }
-                      onChange={(event) =>
+                      onChange={(
+                        event
+                      ) =>
                         updateProfileField(
                           "first_name",
-                          event.target.value
+                          event.target
+                            .value
                         )
                       }
-                      className={inputClass}
+                      className={
+                        inputClass
+                      }
                     />
                   </div>
 
@@ -1093,13 +1370,18 @@ export default function UserProfile() {
                       value={
                         profile.last_name
                       }
-                      onChange={(event) =>
+                      onChange={(
+                        event
+                      ) =>
                         updateProfileField(
                           "last_name",
-                          event.target.value
+                          event.target
+                            .value
                         )
                       }
-                      className={inputClass}
+                      className={
+                        inputClass
+                      }
                     />
                   </div>
 
@@ -1114,15 +1396,22 @@ export default function UserProfile() {
                     <input
                       id="profilePhone"
                       type="tel"
-                      value={profile.phone}
-                      onChange={(event) =>
+                      value={
+                        profile.phone
+                      }
+                      onChange={(
+                        event
+                      ) =>
                         updateProfileField(
                           "phone",
-                          event.target.value
+                          event.target
+                            .value
                         )
                       }
                       autoComplete="tel"
-                      className={inputClass}
+                      className={
+                        inputClass
+                      }
                     />
                   </div>
 
@@ -1138,7 +1427,8 @@ export default function UserProfile() {
                       id="profileEmail"
                       type="email"
                       value={
-                        user.email ?? ""
+                        user.email ??
+                        ""
                       }
                       disabled
                       className="mt-2 w-full cursor-not-allowed rounded-xl border border-[#e0e4db] bg-[#f2f3ef] px-4 py-3 text-[#8a9184]"
@@ -1151,7 +1441,9 @@ export default function UserProfile() {
                   onClick={() =>
                     void savePersonalData()
                   }
-                  disabled={savingProfile}
+                  disabled={
+                    savingProfile
+                  }
                   className="mt-8 rounded-xl bg-[#425530] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:opacity-50"
                 >
                   {savingProfile
@@ -1181,14 +1473,17 @@ export default function UserProfile() {
 
                   <button
                     type="button"
-                    onClick={openNewAddressForm}
+                    onClick={
+                      openNewAddressForm
+                    }
                     className="rounded-xl bg-[#425530] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#344526]"
                   >
                     Añadir dirección
                   </button>
                 </div>
 
-                {addresses.length === 0 ? (
+                {addresses.length ===
+                0 ? (
                   <div className="mt-8 rounded-2xl border border-dashed border-[#ccd5c3] bg-[#fafbf8] p-10 text-center">
                     <p className="font-semibold text-[#394631]">
                       Todavía no tienes direcciones
@@ -1201,9 +1496,13 @@ export default function UserProfile() {
                 ) : (
                   <div className="mt-8 grid gap-4 md:grid-cols-2">
                     {addresses.map(
-                      (address) => (
+                      (
+                        address
+                      ) => (
                         <article
-                          key={address.id}
+                          key={
+                            address.id
+                          }
                           className={`relative rounded-2xl border p-5 ${
                             address.is_default
                               ? "border-[#718360] bg-[#f4f7f1]"
@@ -1230,34 +1529,57 @@ export default function UserProfile() {
                                   address.first_name,
                                   address.last_name,
                                 ]
-                                  .filter(Boolean)
-                                  .join(" ")}
+                                  .filter(
+                                    Boolean
+                                  )
+                                  .join(
+                                    " "
+                                  )}
                               </p>
 
                               {address.company && (
                                 <p className="mt-1 text-sm text-[#687261]">
-                                  {address.company}
+                                  {
+                                    address.company
+                                  }
                                 </p>
                               )}
 
                               <p className="mt-2 text-sm leading-6 text-[#687261]">
-                                {address.address_line1}
+                                {
+                                  address.address_line1
+                                }
+
                                 {address.address_line2
                                   ? `, ${address.address_line2}`
                                   : ""}
+
                                 <br />
-                                {address.postal_code}{" "}
-                                {address.city}
+
+                                {
+                                  address.postal_code
+                                }{" "}
+                                {
+                                  address.city
+                                }
+
                                 {address.region
                                   ? `, ${address.region}`
                                   : ""}
+
                                 <br />
-                                {address.country}
+
+                                {
+                                  address.country
+                                }
                               </p>
 
                               {address.phone && (
                                 <p className="mt-2 text-sm text-[#687261]">
-                                  Tel. {address.phone}
+                                  Tel.{" "}
+                                  {
+                                    address.phone
+                                  }
                                 </p>
                               )}
                             </div>
@@ -1332,7 +1654,9 @@ export default function UserProfile() {
 
                       <button
                         type="button"
-                        onClick={closeAddressForm}
+                        onClick={
+                          closeAddressForm
+                        }
                         className="rounded-lg px-3 py-2 text-sm font-semibold text-[#697361] hover:bg-white"
                       >
                         Cerrar
@@ -1350,14 +1674,20 @@ export default function UserProfile() {
                           value={
                             addressForm.label
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "label",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
                           placeholder="Casa, trabajo, padres…"
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1371,13 +1701,19 @@ export default function UserProfile() {
                           value={
                             addressForm.first_name
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "first_name",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1391,13 +1727,19 @@ export default function UserProfile() {
                           value={
                             addressForm.last_name
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "last_name",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1411,13 +1753,19 @@ export default function UserProfile() {
                           value={
                             addressForm.phone
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "phone",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1434,13 +1782,19 @@ export default function UserProfile() {
                           value={
                             addressForm.company
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "company",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1454,20 +1808,28 @@ export default function UserProfile() {
                             editingAddressId ??
                             "new-address"
                           }
-                          ref={addressAutocompleteInputRef}
+                          ref={
+                            addressAutocompleteInputRef
+                          }
                           type="text"
                           defaultValue={
                             addressForm.address_line1
                           }
-                          onInput={(event) =>
+                          onInput={(
+                            event
+                          ) =>
                             updateAddressField(
                               "address_line1",
-                              event.currentTarget.value
+                              event
+                                .currentTarget
+                                .value
                             )
                           }
                           placeholder="Empieza a escribir la calle y selecciona una opción"
                           autoComplete="off"
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
 
                         <p className="mt-2 text-xs leading-5 text-[#7b8574]">
@@ -1476,7 +1838,9 @@ export default function UserProfile() {
 
                         {mapsError && (
                           <p className="mt-2 text-xs leading-5 text-amber-700">
-                            {mapsError}
+                            {
+                              mapsError
+                            }
                           </p>
                         )}
                       </div>
@@ -1494,13 +1858,19 @@ export default function UserProfile() {
                           value={
                             addressForm.address_line2
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "address_line2",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1514,13 +1884,19 @@ export default function UserProfile() {
                           value={
                             addressForm.postal_code
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "postal_code",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1534,13 +1910,19 @@ export default function UserProfile() {
                           value={
                             addressForm.city
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "city",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1554,13 +1936,19 @@ export default function UserProfile() {
                           value={
                             addressForm.region
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "region",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1574,13 +1962,19 @@ export default function UserProfile() {
                           value={
                             addressForm.country
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "country",
-                              event.target.value
+                              event
+                                .target
+                                .value
                             )
                           }
-                          className={inputClass}
+                          className={
+                            inputClass
+                          }
                         />
                       </div>
 
@@ -1590,10 +1984,14 @@ export default function UserProfile() {
                           checked={
                             addressForm.is_default
                           }
-                          onChange={(event) =>
+                          onChange={(
+                            event
+                          ) =>
                             updateAddressField(
                               "is_default",
-                              event.target.checked
+                              event
+                                .target
+                                .checked
                             )
                           }
                           className="h-4 w-4 rounded border-[#cbd3c2] text-[#425530] focus:ring-[#718360]"
@@ -1611,7 +2009,9 @@ export default function UserProfile() {
                         onClick={() =>
                           void saveAddress()
                         }
-                        disabled={savingAddress}
+                        disabled={
+                          savingAddress
+                        }
                         className="rounded-xl bg-[#425530] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:opacity-50"
                       >
                         {savingAddress
@@ -1623,7 +2023,9 @@ export default function UserProfile() {
 
                       <button
                         type="button"
-                        onClick={closeAddressForm}
+                        onClick={
+                          closeAddressForm
+                        }
                         className="rounded-xl border border-[#ccd5c3] bg-white px-6 py-3 text-sm font-semibold text-[#52604b] hover:bg-[#f4f6f1]"
                       >
                         Cancelar
@@ -1637,6 +2039,12 @@ export default function UserProfile() {
             {activeSection ===
               "pedidos" && (
               <UserPedidosPanel />
+            )}
+
+            {/* NUEVO */}
+            {activeSection ===
+              "devoluciones" && (
+              <UserReturnsPanel />
             )}
 
             {activeSection ===
