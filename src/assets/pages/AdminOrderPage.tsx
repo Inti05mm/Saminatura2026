@@ -3,9 +3,14 @@ import Header from "../containers/Header";
 import AdminOrdersManager from "../containers/AdminOrdersManager";
 import AdminAnalytics from "../containers/AdminAnalytics";
 import AdminTopNav from "../containers/AdminSidebar";
+import AdminReturnsManager from "../containers/AdminReturnsManager";
 
 const SECTIONS = [
   { id: "pedidos", label: "Pedidos" },
+  {
+    id: "devoluciones",
+    label: "Devoluciones",
+  },
   { id: "graficos", label: "Gráficos" },
 ] as const;
 
@@ -58,6 +63,12 @@ export default function AdminOrdersPage() {
         <section id="pedidos" className="scroll-mt-32">
           <AdminOrdersManager />
         </section>
+        <section
+  id="devoluciones"
+  className="scroll-mt-32"
+>
+  <AdminReturnsManager />
+</section>
 
         <section id="graficos" className="scroll-mt-32">
           <AdminAnalytics />
