@@ -43,8 +43,10 @@ import CondicionesCompraPage from "./assets/pages/CondicionesCompraPage";
 import CookiesPage from "./assets/pages/CookiesPage";
 import PrivacidadPage from "./assets/pages/PrivacidadPage";
 import AvisoLegalPage from "./assets/pages/AvisoLegalPage";
-
-
+import ShopifyShopPage from "./assets/pages/ShopifyShopPage";
+import { ShopifyCartProvider } from "./assets/containers/ShopifyCartContext";
+import ShopifyCartPage from "./assets/pages/ShopifyCartPage";
+import ShopifyProductDetailPage from "./assets/pages/ShopifyProductDetailPage";
 /*
   Cada vez que cambia la ruta,
   lleva automáticamente al usuario
@@ -128,6 +130,11 @@ function AppRoutes() {
         />
 
         <Route
+  path="/micesta-shopify-test"
+  element={<ShopifyCartPage />}
+/>
+
+        <Route
           path="/comunidad"
           element={<ComunidadPage />}
         />
@@ -151,6 +158,16 @@ function AppRoutes() {
           path="/modificarproductos"
           element={<EditProductsPage />}
         />
+
+        <Route
+  path="/shopping-shopify-test/:handle"
+  element={<ShopifyProductDetailPage />}
+/>
+
+        <Route
+  path="/shopping-shopify-test"
+  element={<ShopifyShopPage />}
+/>
 
         <Route
           path="/micesta"
@@ -278,11 +295,13 @@ export default function App() {
   return (
     <Router>
       <UserProvider>
-        <CartProvider>
-          <FavoritesProvider>
-            <AppRoutes />
-          </FavoritesProvider>
-        </CartProvider>
+<CartProvider>
+  <ShopifyCartProvider>
+    <FavoritesProvider>
+      <AppRoutes />
+    </FavoritesProvider>
+  </ShopifyCartProvider>
+</CartProvider>
       </UserProvider>
     </Router>
   );

@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import {
   Link,
   useNavigate,
@@ -6,8 +11,13 @@ import {
 } from "react-router-dom";
 
 import { supabase } from "../supabaseClient";
+
 import { useUser } from "../containers/useUser";
+
 import { useCart } from "../containers/CartContext";
+
+import { useShopifyCart } from "../containers/ShopifyCartContext";
+
 import { useFavorites } from "../containers/FavoritesContext";
 
 type Toast =
@@ -25,7 +35,9 @@ function saveToastForNextPage(
       "toast",
       JSON.stringify(toast)
     );
-  } catch {}
+  } catch {
+    // Sin acción.
+  }
 }
 
 type ProductSuggestion = {
@@ -64,109 +76,252 @@ type SuggestItem =
       size: string | null;
     };
 
-const Header: React.FC<{ title?: string }> = ({
+const Header: React.FC<{
+  title?: string;
+}> = ({
   title = "Saminatura",
 }) => {
-  const [userMenuOpen, setUserMenuOpen] =
-    useState(false);
-
-  const [profile, setProfile] = useState<any>(null);
-
-  const [searchQuery, setSearchQuery] =
-    useState("");
-
-  const [items, setItems] = useState<SuggestItem[]>(
-    []
-  );
-
-  const [suggestOpen, setSuggestOpen] =
-    useState(false);
-
-  const [suggestLoading, setSuggestLoading] =
-    useState(false);
-
-  const [toast, setToast] = useState<Toast>(null);
-
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isHomePage = location.pathname === "/";
+  /*
+    ============================================================
+    DETECTAR SI ESTAMOS EN LA VERSIÓN SHOPIFY DE PRUEBA
+    ============================================================
 
-  const { user, initializing } = useUser();
+    Ejemplos:
+
+    /shopping-shopify-test
+    /shopping-shopify-test/pan-tostado
+    /micesta-shopify-test
+  */
+  const isShopifyTest =
+    location.pathname.startsWith(
+      "/shopping-shopify-test"
+    ) ||
+    location.pathname.startsWith(
+      "/micesta-shopify-test"
+    );
+
+  /*
+    Rutas que usa el Header dependiendo
+    de si estamos en Supabase o Shopify.
+  */
+  const shoppingHref = isShopifyTest
+    ? "/shopping-shopify-test"
+    : "/shopping";
+
+  const cartHref = isShopifyTest
+    ? "/micesta-shopify-test"
+    : "/micesta";
+
+  const isHomePage =
+    location.pathname === "/";
+
+  // ============================================================
+  // USUARIO
+  // ============================================================
 
   const {
-    cart,
-    loading: cartLoading,
+    user,
+    initializing,
+  } = useUser();
+
+  const [
+    userMenuOpen,
+    setUserMenuOpen,
+  ] = useState(false);
+
+  const [
+    profile,
+    setProfile,
+  ] = useState<any>(null);
+
+  // ============================================================
+  // CARRITO ANTIGUO SUPABASE
+  // ============================================================
+
+  const {
+    cart: legacyCart,
+    loading: legacyCartLoading,
   } = useCart();
 
-  const { favoriteCount } = useFavorites();
+  const legacyCartItemCount =
+    legacyCart.items.reduce(
+      (total, item) =>
+        total + item.qty,
+      0
+    );
 
-  const cartItemCount = cart.items.reduce(
-    (total, item) => total + item.qty,
-    0
-  );
+  // ============================================================
+  // CARRITO SHOPIFY
+  // ============================================================
 
-  const [cartBouncing, setCartBouncing] =
-    useState(false);
+  const {
+    totalItems: shopifyCartItemCount,
+    loading: shopifyCartLoading,
+  } = useShopifyCart();
 
-  const previousCartCountRef = useRef(0);
+  /*
+    El Header elige automáticamente
+    qué carrito mostrar.
+  */
+  const cartItemCount =
+    isShopifyTest
+      ? shopifyCartItemCount
+      : legacyCartItemCount;
 
-  const cartCountInitializedRef = useRef(false);
+  const cartLoading =
+    isShopifyTest
+      ? shopifyCartLoading
+      : legacyCartLoading;
 
-  const cartBounceTimerRef = useRef<number | null>(
-    null
-  );
+  // ============================================================
+  // FAVORITOS
+  // ============================================================
 
-  const userBtnRef =
-    useRef<HTMLButtonElement | null>(null);
+  /*
+    Por ahora siguen siendo los favoritos
+    actuales de Supabase.
 
-  const userMenuRef =
-    useRef<HTMLDivElement | null>(null);
+    Los migraremos después.
+  */
+  const {
+    favoriteCount,
+  } = useFavorites();
 
-  const searchWrapRef =
-    useRef<HTMLFormElement | null>(null);
+  // ============================================================
+  // BUSCADOR
+  // ============================================================
 
-  const searchCatalogRef = useRef<
-    SearchCatalogRow[] | null
-  >(null);
+  const [
+    searchQuery,
+    setSearchQuery,
+  ] = useState("");
+
+  const [
+    items,
+    setItems,
+  ] = useState<SuggestItem[]>([]);
+
+  const [
+    suggestOpen,
+    setSuggestOpen,
+  ] = useState(false);
+
+  const [
+    suggestLoading,
+    setSuggestLoading,
+  ] = useState(false);
+
+  // ============================================================
+  // TOAST
+  // ============================================================
+
+  const [
+    toast,
+    setToast,
+  ] = useState<Toast>(null);
+
+  // ============================================================
+  // ANIMACIÓN CARRITO
+  // ============================================================
+
+  const [
+    cartBouncing,
+    setCartBouncing,
+  ] = useState(false);
+
+  const previousCartCountRef =
+    useRef(0);
+
+  const cartCountInitializedRef =
+    useRef(false);
+
+  const cartBounceTimerRef =
+    useRef<number | null>(
+      null
+    );
+
+  /*
+    Si cambiamos entre la versión
+    Supabase y Shopify, reiniciamos
+    el contador de la animación.
+
+    Así no hace un "rebote" falso por
+    tener distintas cantidades.
+  */
+  useEffect(() => {
+    cartCountInitializedRef.current =
+      false;
+
+    previousCartCountRef.current =
+      cartItemCount;
+
+    setCartBouncing(false);
+  }, [isShopifyTest]);
 
   useEffect(() => {
-    if (cartLoading) return;
-
-    if (!cartCountInitializedRef.current) {
-      previousCartCountRef.current = cartItemCount;
-      cartCountInitializedRef.current = true;
+    if (cartLoading) {
       return;
     }
 
     if (
-      cartItemCount > previousCartCountRef.current
+      !cartCountInitializedRef.current
+    ) {
+      previousCartCountRef.current =
+        cartItemCount;
+
+      cartCountInitializedRef.current =
+        true;
+
+      return;
+    }
+
+    if (
+      cartItemCount >
+      previousCartCountRef.current
     ) {
       setCartBouncing(false);
 
-      window.requestAnimationFrame(() => {
-        setCartBouncing(true);
-      });
+      window.requestAnimationFrame(
+        () => {
+          setCartBouncing(true);
+        }
+      );
 
-      if (cartBounceTimerRef.current) {
+      if (
+        cartBounceTimerRef.current
+      ) {
         window.clearTimeout(
           cartBounceTimerRef.current
         );
       }
 
       cartBounceTimerRef.current =
-        window.setTimeout(() => {
-          setCartBouncing(false);
-          cartBounceTimerRef.current = null;
-        }, 650);
+        window.setTimeout(
+          () => {
+            setCartBouncing(false);
+
+            cartBounceTimerRef.current =
+              null;
+          },
+          650
+        );
     }
 
-    previousCartCountRef.current = cartItemCount;
-  }, [cartItemCount, cartLoading]);
+    previousCartCountRef.current =
+      cartItemCount;
+  }, [
+    cartItemCount,
+    cartLoading,
+  ]);
 
   useEffect(() => {
     return () => {
-      if (cartBounceTimerRef.current) {
+      if (
+        cartBounceTimerRef.current
+      ) {
         window.clearTimeout(
           cartBounceTimerRef.current
         );
@@ -174,36 +329,89 @@ const Header: React.FC<{ title?: string }> = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (!toast) return;
+  // ============================================================
+  // REFS
+  // ============================================================
 
-    const timer = window.setTimeout(() => {
-      setToast(null);
-    }, 3500);
+  const userBtnRef =
+    useRef<HTMLButtonElement | null>(
+      null
+    );
+
+  const userMenuRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
+
+  const searchWrapRef =
+    useRef<HTMLFormElement | null>(
+      null
+    );
+
+  const searchCatalogRef =
+    useRef<
+      SearchCatalogRow[] | null
+    >(null);
+
+  // ============================================================
+  // TOAST
+  // ============================================================
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          setToast(null);
+        },
+        3500
+      );
 
     return () => {
-      window.clearTimeout(timer);
+      window.clearTimeout(
+        timer
+      );
     };
   }, [toast]);
+
+  // ============================================================
+  // PERFIL
+  // ============================================================
 
   useEffect(() => {
     let cancelled = false;
 
-    const loadProfile = async () => {
-      if (initializing) return;
+    const loadProfile =
+      async () => {
+        if (initializing) {
+          return;
+        }
 
-      if (!user) {
-        setProfile(null);
-        return;
-      }
+        if (!user) {
+          setProfile(null);
+          return;
+        }
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .single();
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from("profiles")
+            .select("*")
+            .eq(
+              "id",
+              user.id
+            )
+            .single();
 
-      if (!cancelled) {
+        if (cancelled) {
+          return;
+        }
+
         if (error) {
           console.error(
             "Error profile:",
@@ -214,74 +422,123 @@ const Header: React.FC<{ title?: string }> = ({
         } else {
           setProfile(data);
         }
-      }
-    };
+      };
 
     void loadProfile();
 
     return () => {
       cancelled = true;
     };
-  }, [user?.id, initializing]);
+  }, [
+    user?.id,
+    initializing,
+  ]);
 
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error("signOut failed:", error);
+  // ============================================================
+  // LOGOUT
+  // ============================================================
 
-      setToast({
-        type: "error",
-        msg: "No se pudo cerrar sesión. Inténtalo otra vez.",
-      });
+  const handleLogout =
+    async () => {
+      try {
+        await supabase.auth.signOut();
+      } catch (error) {
+        console.error(
+          "signOut failed:",
+          error
+        );
 
-      return;
-    }
+        setToast({
+          type: "error",
+          msg: "No se pudo cerrar sesión. Inténtalo otra vez.",
+        });
 
-    setUserMenuOpen(false);
+        return;
+      }
 
-    const message: Exclude<Toast, null> = {
-      type: "success",
-      msg: "Se ha cerrado sesión con éxito.",
+      setUserMenuOpen(false);
+
+      const message: Exclude<
+        Toast,
+        null
+      > = {
+        type: "success",
+        msg: "Se ha cerrado sesión con éxito.",
+      };
+
+      setToast(message);
+
+      saveToastForNextPage(
+        message
+      );
+
+      if (
+        location.pathname !== "/"
+      ) {
+        navigate("/");
+      }
     };
 
-    setToast(message);
-    saveToastForNextPage(message);
+  // ============================================================
+  // HELPERS BUSCADOR
+  // ============================================================
 
-    if (location.pathname !== "/") {
-      navigate("/");
-    }
-  };
-
-  const uniq = (values: string[]) =>
+  const uniq = (
+    values: string[]
+  ) =>
     Array.from(
       new Set(
         values
-          .map((value) => value.trim())
+          .map((value) =>
+            value.trim()
+          )
           .filter(Boolean)
       )
     );
 
-  const normalizeText = (value: string) =>
+  const normalizeText = (
+    value: string
+  ) =>
     value
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
+      .replace(
+        /[\u0300-\u036f]/g,
+        ""
+      )
       .toLocaleLowerCase("es")
       .trim();
 
-  function fullProductName(product: {
-    name: string;
-    flavor: string | null;
-    size: string | null;
-  }) {
-    const base = (product.name ?? "").trim();
-    const flavor = (product.flavor ?? "").trim();
-    const size = (product.size ?? "").trim();
+  function fullProductName(
+    product: {
+      name: string;
+      flavor: string | null;
+      size: string | null;
+    }
+  ) {
+    const base = (
+      product.name ?? ""
+    ).trim();
 
-    return [base, flavor, size]
+    const flavor = (
+      product.flavor ?? ""
+    ).trim();
+
+    const size = (
+      product.size ?? ""
+    ).trim();
+
+    return [
+      base,
+      flavor,
+      size,
+    ]
       .filter(Boolean)
       .join(" ");
   }
+
+  // ============================================================
+  // IR A PRODUCTO
+  // ============================================================
 
   const goToProduct = (
     product: ProductSuggestion
@@ -289,15 +546,55 @@ const Header: React.FC<{ title?: string }> = ({
     setSuggestOpen(false);
     setUserMenuOpen(false);
 
-    setSearchQuery(
+    const displayName =
       fullProductName({
         name: product.name,
-        flavor: product.flavor,
-        size: product.size,
-      })
+        flavor:
+          product.flavor,
+        size:
+          product.size,
+      });
+
+    setSearchQuery(
+      displayName
     );
 
-    const slug = (product.slug ?? "").trim();
+    const slug = (
+      product.slug ?? ""
+    ).trim();
+
+    /*
+      En la web antigua podemos navegar
+      directamente al producto por id.
+
+      En Shopify, de momento el buscador
+      todavía obtiene sugerencias desde
+      Supabase.
+
+      Como un producto agrupado en Shopify
+      puede tener un HANDLE distinto al slug
+      de una variante antigua, es más seguro
+      mandar al listado de resultados.
+
+      Cuando migremos el buscador totalmente
+      a Shopify, podrá abrir directamente
+      /shopping-shopify-test/:handle.
+    */
+    if (isShopifyTest) {
+      const params =
+        new URLSearchParams();
+
+      params.set(
+        "search",
+        displayName
+      );
+
+      navigate(
+        `${shoppingHref}?${params.toString()}#products`
+      );
+
+      return;
+    }
 
     const target = slug
       ? `/shopping/${slug}-${product.id}`
@@ -306,6 +603,10 @@ const Header: React.FC<{ title?: string }> = ({
     navigate(target);
   };
 
+  // ============================================================
+  // FILTRAR SHOPPING
+  // ============================================================
+
   const goToFilteredShopping = (
     kind: "category" | "brand",
     value: string
@@ -313,49 +614,67 @@ const Header: React.FC<{ title?: string }> = ({
     setSuggestOpen(false);
     setUserMenuOpen(false);
 
-    const params = new URLSearchParams();
+    const params =
+      new URLSearchParams();
 
-    params.set(kind, value);
+    params.set(
+      kind,
+      value
+    );
 
     navigate(
-      `/shopping?${params.toString()}#products`
+      `${shoppingHref}?${params.toString()}#products`
     );
   };
+
+  // ============================================================
+  // SUBMIT BUSCADOR
+  // ============================================================
 
   const handleSearchSubmit = (
     event: React.FormEvent
   ) => {
     event.preventDefault();
 
-    const query = searchQuery.trim();
+    const query =
+      searchQuery.trim();
 
-    if (!query) return;
+    if (!query) {
+      return;
+    }
 
-    const normalizedQuery = normalizeText(query);
+    const normalizedQuery =
+      normalizeText(query);
 
-    const exactCategory = items.find(
-      (item) =>
-        item.kind === "category" &&
-        normalizeText(item.value) ===
-          normalizedQuery
-    ) as
-      | {
-          kind: "category";
-          value: string;
-        }
-      | undefined;
+    const exactCategory =
+      items.find(
+        (item) =>
+          item.kind ===
+            "category" &&
+          normalizeText(
+            item.value
+          ) === normalizedQuery
+      ) as
+        | {
+            kind: "category";
+            value: string;
+          }
+        | undefined;
 
-    const exactBrand = items.find(
-      (item) =>
-        item.kind === "brand" &&
-        normalizeText(item.value) ===
-          normalizedQuery
-    ) as
-      | {
-          kind: "brand";
-          value: string;
-        }
-      | undefined;
+    const exactBrand =
+      items.find(
+        (item) =>
+          item.kind ===
+            "brand" &&
+          normalizeText(
+            item.value
+          ) === normalizedQuery
+      ) as
+        | {
+            kind: "brand";
+            value: string;
+          }
+        | undefined;
 
     if (exactCategory) {
       goToFilteredShopping(
@@ -375,31 +694,39 @@ const Header: React.FC<{ title?: string }> = ({
       return;
     }
 
-    const softCategory = items.find(
-      (item) =>
-        item.kind === "category" &&
-        normalizeText(item.value).includes(
-          normalizedQuery
-        )
-    ) as
-      | {
-          kind: "category";
-          value: string;
-        }
-      | undefined;
+    const softCategory =
+      items.find(
+        (item) =>
+          item.kind ===
+            "category" &&
+          normalizeText(
+            item.value
+          ).includes(
+            normalizedQuery
+          )
+      ) as
+        | {
+            kind: "category";
+            value: string;
+          }
+        | undefined;
 
-    const softBrand = items.find(
-      (item) =>
-        item.kind === "brand" &&
-        normalizeText(item.value).includes(
-          normalizedQuery
-        )
-    ) as
-      | {
-          kind: "brand";
-          value: string;
-        }
-      | undefined;
+    const softBrand =
+      items.find(
+        (item) =>
+          item.kind ===
+            "brand" &&
+          normalizeText(
+            item.value
+          ).includes(
+            normalizedQuery
+          )
+      ) as
+        | {
+            kind: "brand";
+            value: string;
+          }
+        | undefined;
 
     if (softCategory) {
       goToFilteredShopping(
@@ -419,221 +746,393 @@ const Header: React.FC<{ title?: string }> = ({
       return;
     }
 
-    const params = new URLSearchParams(
-      location.search
+    const params =
+      new URLSearchParams();
+
+    params.set(
+      "search",
+      query
     );
 
-    params.set("search", query);
-
     navigate(
-      `/shopping?${params.toString()}#products`
+      `${shoppingHref}?${params.toString()}#products`
     );
 
     setUserMenuOpen(false);
     setSuggestOpen(false);
   };
 
+  // ============================================================
+  // CARGAR SUGERENCIAS
+  // ============================================================
+
+  /*
+    Esto sigue leyendo Supabase temporalmente.
+
+    No afecta al carrito Shopify.
+    Más adelante sustituiremos este bloque
+    por búsqueda Storefront API.
+  */
   useEffect(() => {
     let alive = true;
 
-    const query = searchQuery.trim();
+    const query =
+      searchQuery.trim();
 
-    if (query.length < 2) {
+    if (
+      query.length < 2
+    ) {
       setItems([]);
-      setSuggestLoading(false);
+
+      setSuggestLoading(
+        false
+      );
+
       return;
     }
 
     setSuggestLoading(true);
 
-    const timer = window.setTimeout(async () => {
-      try {
-        if (!searchCatalogRef.current) {
-          const { data, error } = await supabase
-            .from("public_products")
-            .select(
-              "id,name,slug,flavor,size,category,brand"
-            )
-            .order("name", {
-              ascending: true,
-            })
-            .range(0, 4999);
+    const timer =
+      window.setTimeout(
+        async () => {
+          try {
+            if (
+              !searchCatalogRef.current
+            ) {
+              const {
+                data,
+                error,
+              } =
+                await supabase
+                  .from(
+                    "public_products"
+                  )
+                  .select(
+                    "id,name,slug,flavor,size,category,brand"
+                  )
+                  .order(
+                    "name",
+                    {
+                      ascending:
+                        true,
+                    }
+                  )
+                  .range(
+                    0,
+                    4999
+                  );
 
-          if (error) {
-            console.error(
-              "Search catalog error:",
-              error.message
-            );
+              if (error) {
+                console.error(
+                  "Search catalog error:",
+                  error.message
+                );
 
-            if (alive) {
-              setItems([]);
+                if (alive) {
+                  setItems(
+                    []
+                  );
+                }
+
+                return;
+              }
+
+              searchCatalogRef.current =
+                (
+                  data ?? []
+                )
+                  .filter(
+                    (
+                      row: any
+                    ) =>
+                      row?.id !=
+                        null &&
+                      row?.name
+                  )
+                  .map(
+                    (
+                      row: any
+                    ) => ({
+                      id: Number(
+                        row.id
+                      ),
+
+                      name:
+                        String(
+                          row.name
+                        ),
+
+                      slug:
+                        row.slug !=
+                        null
+                          ? String(
+                              row.slug
+                            )
+                          : null,
+
+                      flavor:
+                        row.flavor !=
+                        null
+                          ? String(
+                              row.flavor
+                            )
+                          : null,
+
+                      size:
+                        row.size !=
+                        null
+                          ? String(
+                              row.size
+                            )
+                          : null,
+
+                      category:
+                        row.category !=
+                        null
+                          ? String(
+                              row.category
+                            )
+                          : null,
+
+                      brand:
+                        row.brand !=
+                        null
+                          ? String(
+                              row.brand
+                            )
+                          : null,
+                    })
+                  );
             }
 
-            return;
-          }
+            if (!alive) {
+              return;
+            }
 
-          searchCatalogRef.current = (
-            data ?? []
-          )
-            .filter(
-              (row: any) =>
-                row?.id != null && row?.name
-            )
-            .map((row: any) => ({
-              id: Number(row.id),
-              name: String(row.name),
-
-              slug:
-                row.slug != null
-                  ? String(row.slug)
-                  : null,
-
-              flavor:
-                row.flavor != null
-                  ? String(row.flavor)
-                  : null,
-
-              size:
-                row.size != null
-                  ? String(row.size)
-                  : null,
-
-              category:
-                row.category != null
-                  ? String(row.category)
-                  : null,
-
-              brand:
-                row.brand != null
-                  ? String(row.brand)
-                  : null,
-            }));
-        }
-
-        if (!alive) return;
-
-        const normalizedQuery =
-          normalizeText(query);
-
-        const catalog =
-          searchCatalogRef.current ?? [];
-
-        const matchingRows = catalog.filter(
-          (row) => {
-            const searchableProductName =
-              fullProductName({
-                name: row.name,
-                flavor: row.flavor,
-                size: row.size,
-              });
-
-            return (
+            const normalizedQuery =
               normalizeText(
-                searchableProductName
-              ).includes(normalizedQuery) ||
-              normalizeText(
-                row.category ?? ""
-              ).includes(normalizedQuery) ||
-              normalizeText(
-                row.brand ?? ""
-              ).includes(normalizedQuery)
-            );
-          }
-        );
+                query
+              );
 
-        const categories = uniq(
-          matchingRows
-            .map((row) => row.category ?? "")
-            .filter((value) =>
-              normalizeText(value).includes(
-                normalizedQuery
-              )
-            )
-        ).slice(0, 6);
+            const catalog =
+              searchCatalogRef.current ??
+              [];
 
-        const brands = uniq(
-          matchingRows
-            .map((row) => row.brand ?? "")
-            .filter((value) =>
-              normalizeText(value).includes(
-                normalizedQuery
-              )
-            )
-        ).slice(0, 6);
+            const matchingRows =
+              catalog.filter(
+                (row) => {
+                  const searchableProductName =
+                    fullProductName(
+                      {
+                        name:
+                          row.name,
 
-        const products: SuggestItem[] =
-          matchingRows
-            .filter((row) =>
-              normalizeText(
-                fullProductName({
-                  name: row.name,
-                  flavor: row.flavor,
-                  size: row.size,
+                        flavor:
+                          row.flavor,
+
+                        size:
+                          row.size,
+                      }
+                    );
+
+                  return (
+                    normalizeText(
+                      searchableProductName
+                    ).includes(
+                      normalizedQuery
+                    ) ||
+                    normalizeText(
+                      row.category ??
+                        ""
+                    ).includes(
+                      normalizedQuery
+                    ) ||
+                    normalizeText(
+                      row.brand ??
+                        ""
+                    ).includes(
+                      normalizedQuery
+                    )
+                  );
+                }
+              );
+
+            const categories =
+              uniq(
+                matchingRows
+                  .map(
+                    (row) =>
+                      row.category ??
+                      ""
+                  )
+                  .filter(
+                    (
+                      value
+                    ) =>
+                      normalizeText(
+                        value
+                      ).includes(
+                        normalizedQuery
+                      )
+                  )
+              ).slice(
+                0,
+                6
+              );
+
+            const brands =
+              uniq(
+                matchingRows
+                  .map(
+                    (row) =>
+                      row.brand ??
+                      ""
+                  )
+                  .filter(
+                    (
+                      value
+                    ) =>
+                      normalizeText(
+                        value
+                      ).includes(
+                        normalizedQuery
+                      )
+                  )
+              ).slice(
+                0,
+                6
+              );
+
+            const products: SuggestItem[] =
+              matchingRows
+                .filter(
+                  (row) =>
+                    normalizeText(
+                      fullProductName(
+                        {
+                          name:
+                            row.name,
+
+                          flavor:
+                            row.flavor,
+
+                          size:
+                            row.size,
+                        }
+                      )
+                    ).includes(
+                      normalizedQuery
+                    )
+                )
+                .slice(
+                  0,
+                  8
+                )
+                .map(
+                  (row) => ({
+                    kind:
+                      "product",
+
+                    id:
+                      row.id,
+
+                    name:
+                      row.name,
+
+                    slug:
+                      row.slug,
+
+                    flavor:
+                      row.flavor,
+
+                    size:
+                      row.size,
+                  })
+                );
+
+            const categorySuggestionItems: SuggestItem[] =
+              categories.map(
+                (value) => ({
+                  kind:
+                    "category",
+                  value,
                 })
-              ).includes(normalizedQuery)
-            )
-            .slice(0, 8)
-            .map((row) => ({
-              kind: "product",
-              id: row.id,
-              name: row.name,
-              slug: row.slug,
-              flavor: row.flavor,
-              size: row.size,
-            }));
+              );
 
-        const categorySuggestionItems: SuggestItem[] =
-          categories.map((value) => ({
-            kind: "category",
-            value,
-          }));
+            const brandSuggestionItems: SuggestItem[] =
+              brands.map(
+                (value) => ({
+                  kind:
+                    "brand",
+                  value,
+                })
+              );
 
-        const brandSuggestionItems: SuggestItem[] =
-          brands.map((value) => ({
-            kind: "brand",
-            value,
-          }));
-
-        setItems([
-          ...categorySuggestionItems,
-          ...brandSuggestionItems,
-          ...products,
-        ]);
-      } finally {
-        if (alive) {
-          setSuggestLoading(false);
-        }
-      }
-    }, 250);
+            setItems([
+              ...categorySuggestionItems,
+              ...brandSuggestionItems,
+              ...products,
+            ]);
+          } finally {
+            if (alive) {
+              setSuggestLoading(
+                false
+              );
+            }
+          }
+        },
+        250
+      );
 
     return () => {
       alive = false;
-      window.clearTimeout(timer);
+
+      window.clearTimeout(
+        timer
+      );
     };
   }, [searchQuery]);
+
+  // ============================================================
+  // CERRAR BUSCADOR AL HACER CLIC FUERA
+  // ============================================================
 
   useEffect(() => {
     const handleMouseDown = (
       event: MouseEvent
     ) => {
-      const target = event.target as Node | null;
+      const target =
+        event.target as
+          | Node
+          | null;
 
-      if (!target) return;
+      if (!target) {
+        return;
+      }
 
       const isInsideSearch =
-        searchWrapRef.current?.contains(target) ??
-        false;
+        searchWrapRef.current?.contains(
+          target
+        ) ?? false;
 
       if (!isInsideSearch) {
-        setSuggestOpen(false);
+        setSuggestOpen(
+          false
+        );
       }
     };
 
     const handleKeyDown = (
       event: KeyboardEvent
     ) => {
-      if (event.key === "Escape") {
-        setSuggestOpen(false);
+      if (
+        event.key ===
+        "Escape"
+      ) {
+        setSuggestOpen(
+          false
+        );
       }
     };
 
@@ -661,37 +1160,58 @@ const Header: React.FC<{ title?: string }> = ({
   }, []);
 
   // ============================================================
-  // CERRAR MENÚ DE USUARIO SOLO AL HACER CLIC FUERA
+  // CERRAR MENÚ DE USUARIO
   // ============================================================
 
   useEffect(() => {
-    if (!userMenuOpen) return;
+    if (
+      !userMenuOpen
+    ) {
+      return;
+    }
 
     const handleClickOutside = (
       event: MouseEvent
     ) => {
-      const target = event.target as Node | null;
+      const target =
+        event.target as
+          | Node
+          | null;
 
-      if (!target) return;
+      if (!target) {
+        return;
+      }
 
       const isInsideMenu =
-        userMenuRef.current?.contains(target) ??
-        false;
+        userMenuRef.current?.contains(
+          target
+        ) ?? false;
 
       const isInsideButton =
-        userBtnRef.current?.contains(target) ??
-        false;
+        userBtnRef.current?.contains(
+          target
+        ) ?? false;
 
-      if (!isInsideMenu && !isInsideButton) {
-        setUserMenuOpen(false);
+      if (
+        !isInsideMenu &&
+        !isInsideButton
+      ) {
+        setUserMenuOpen(
+          false
+        );
       }
     };
 
     const handleEscape = (
       event: KeyboardEvent
     ) => {
-      if (event.key === "Escape") {
-        setUserMenuOpen(false);
+      if (
+        event.key ===
+        "Escape"
+      ) {
+        setUserMenuOpen(
+          false
+        );
       }
     };
 
@@ -718,30 +1238,47 @@ const Header: React.FC<{ title?: string }> = ({
     };
   }, [userMenuOpen]);
 
-  const categoryItems = items.filter(
-    (item) => item.kind === "category"
-  ) as Array<{
-    kind: "category";
-    value: string;
-  }>;
+  // ============================================================
+  // SEPARAR SUGERENCIAS
+  // ============================================================
 
-  const brandItems = items.filter(
-    (item) => item.kind === "brand"
-  ) as Array<{
-    kind: "brand";
-    value: string;
-  }>;
+  const categoryItems =
+    items.filter(
+      (item) =>
+        item.kind ===
+        "category"
+    ) as Array<{
+      kind: "category";
+      value: string;
+    }>;
 
-  const productItems = items.filter(
-    (item) => item.kind === "product"
-  ) as Array<{
-    kind: "product";
-    id: number;
-    name: string;
-    slug: string | null;
-    flavor: string | null;
-    size: string | null;
-  }>;
+  const brandItems =
+    items.filter(
+      (item) =>
+        item.kind ===
+        "brand"
+    ) as Array<{
+      kind: "brand";
+      value: string;
+    }>;
+
+  const productItems =
+    items.filter(
+      (item) =>
+        item.kind ===
+        "product"
+    ) as Array<{
+      kind: "product";
+      id: number;
+      name: string;
+      slug: string | null;
+      flavor: string | null;
+      size: string | null;
+    }>;
+
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   return (
     <>
@@ -773,24 +1310,28 @@ const Header: React.FC<{ title?: string }> = ({
         }
       `}</style>
 
+      {/* TOAST */}
       {toast && (
         <div className="fixed right-4 top-4 z-[9999]">
           <div
             className={[
               "max-w-sm rounded-xl border px-4 py-3 text-sm shadow-lg",
 
-              toast.type === "success"
+              toast.type ===
+              "success"
                 ? "border-green-200 bg-green-50 text-green-900"
                 : "",
 
-              toast.type === "error"
+              toast.type ===
+              "error"
                 ? "border-red-200 bg-red-50 text-red-900"
                 : "",
             ].join(" ")}
           >
             <div className="flex items-start gap-3">
               <div className="font-semibold">
-                {toast.type === "success"
+                {toast.type ===
+                "success"
                   ? "Listo"
                   : "Error"}
               </div>
@@ -801,7 +1342,11 @@ const Header: React.FC<{ title?: string }> = ({
 
               <button
                 type="button"
-                onClick={() => setToast(null)}
+                onClick={() =>
+                  setToast(
+                    null
+                  )
+                }
                 className="text-gray-500 hover:text-gray-800"
                 aria-label="Cerrar"
               >
@@ -812,9 +1357,10 @@ const Header: React.FC<{ title?: string }> = ({
         </div>
       )}
 
-<header
-  className={[
-    "gris relative z-[1000] w-full overflow-visible bg-transparent px-5 py-2 md:px-6 md:py-3",
+      <header
+        className={[
+          "gris relative z-[1000] w-full overflow-visible bg-transparent px-5 py-2 md:px-6 md:py-3",
+
           "font-sans text-gray-800",
 
           isHomePage
@@ -834,7 +1380,10 @@ const Header: React.FC<{ title?: string }> = ({
               ].join(" "),
         ].join(" ")}
       >
+        {/* ================================================= */}
         {/* LOGO */}
+        {/* ================================================= */}
+
         <Link
           to="/"
           className="
@@ -850,7 +1399,10 @@ const Header: React.FC<{ title?: string }> = ({
           />
         </Link>
 
+        {/* ================================================= */}
         {/* CENTRO DEL HEADER */}
+        {/* ================================================= */}
+
         <div
           className={[
             "flex w-full items-center",
@@ -869,6 +1421,10 @@ const Header: React.FC<{ title?: string }> = ({
           ].join(" ")}
         >
           {isHomePage ? (
+            /* ================================================= */
+            /* MENÚ HOME */
+            /* ================================================= */
+
             <nav
               className="
                 flex items-center justify-center
@@ -899,7 +1455,7 @@ const Header: React.FC<{ title?: string }> = ({
               </Link>
 
               <Link
-                to="/shopping"
+                to={shoppingHref}
                 className="
                   rounded-full
                   px-5 py-2
@@ -931,9 +1487,17 @@ const Header: React.FC<{ title?: string }> = ({
               </Link>
             </nav>
           ) : (
+            /* ================================================= */
+            /* BUSCADOR */
+            /* ================================================= */
+
             <form
-              ref={searchWrapRef}
-              onSubmit={handleSearchSubmit}
+              ref={
+                searchWrapRef
+              }
+              onSubmit={
+                handleSearchSubmit
+              }
               className="w-full max-w-xl"
             >
               <div className="relative">
@@ -956,25 +1520,35 @@ const Header: React.FC<{ title?: string }> = ({
                     type="text"
                     placeholder="Buscar productos..."
                     name="search"
-                    value={searchQuery}
-                    onChange={(event) => {
+                    value={
+                      searchQuery
+                    }
+                    onChange={(
+                      event
+                    ) => {
                       setSearchQuery(
-                        event.target.value
+                        event
+                          .target
+                          .value
                       );
 
                       const next =
                         event.target.value.trim();
 
                       setSuggestOpen(
-                        next.length >= 2
+                        next.length >=
+                          2
                       );
                     }}
                     onFocus={() => {
                       if (
-                        searchQuery.trim().length >=
+                        searchQuery.trim()
+                          .length >=
                         2
                       ) {
-                        setSuggestOpen(true);
+                        setSuggestOpen(
+                          true
+                        );
                       }
                     }}
                     className="
@@ -1018,10 +1592,16 @@ const Header: React.FC<{ title?: string }> = ({
                   </button>
                 </div>
 
+                {/* ============================================= */}
+                {/* SUGERENCIAS */}
+                {/* ============================================= */}
+
                 {suggestOpen &&
                   (suggestLoading ||
-                    items.length > 0 ||
-                    searchQuery.trim().length >=
+                    items.length >
+                      0 ||
+                    searchQuery.trim()
+                      .length >=
                       2) && (
                     <div
                       className="
@@ -1037,12 +1617,16 @@ const Header: React.FC<{ title?: string }> = ({
                         <div className="px-4 py-3 text-sm text-gray-500">
                           Buscando…
                         </div>
-                      ) : items.length === 0 ? (
+                      ) : items.length ===
+                        0 ? (
                         <div className="px-4 py-3 text-sm text-gray-500">
-                          No hay resultados.
+                          No hay
+                          resultados.
                         </div>
                       ) : (
                         <div className="max-h-72 overflow-auto">
+                          {/* CATEGORÍAS */}
+
                           {categoryItems.length >
                             0 && (
                             <div className="py-2">
@@ -1061,7 +1645,9 @@ const Header: React.FC<{ title?: string }> = ({
 
                               <ul>
                                 {categoryItems.map(
-                                  (category) => (
+                                  (
+                                    category
+                                  ) => (
                                     <li
                                       key={`cat-${category.value}`}
                                     >
@@ -1085,7 +1671,8 @@ const Header: React.FC<{ title?: string }> = ({
                                         "
                                       >
                                         <span className="font-medium text-gray-800">
-                                          Ver productos
+                                          Ver
+                                          productos
                                           de{" "}
                                           <span className="font-extrabold">
                                             {
@@ -1105,6 +1692,8 @@ const Header: React.FC<{ title?: string }> = ({
                             </div>
                           )}
 
+                          {/* MARCAS */}
+
                           {brandItems.length >
                             0 && (
                             <div className="border-t border-gray-100 py-2">
@@ -1123,7 +1712,9 @@ const Header: React.FC<{ title?: string }> = ({
 
                               <ul>
                                 {brandItems.map(
-                                  (brand) => (
+                                  (
+                                    brand
+                                  ) => (
                                     <li
                                       key={`brand-${brand.value}`}
                                     >
@@ -1147,7 +1738,8 @@ const Header: React.FC<{ title?: string }> = ({
                                         "
                                       >
                                         <span className="font-medium text-gray-800">
-                                          Ver productos
+                                          Ver
+                                          productos
                                           de{" "}
                                           <span className="font-extrabold">
                                             {
@@ -1167,6 +1759,8 @@ const Header: React.FC<{ title?: string }> = ({
                             </div>
                           )}
 
+                          {/* PRODUCTOS */}
+
                           {productItems.length >
                             0 && (
                             <div className="border-t border-gray-100 py-2">
@@ -1185,14 +1779,22 @@ const Header: React.FC<{ title?: string }> = ({
 
                               <ul>
                                 {productItems.map(
-                                  (product) => {
+                                  (
+                                    product
+                                  ) => {
                                     const label =
-                                      fullProductName({
-                                        name: product.name,
-                                        flavor:
-                                          product.flavor,
-                                        size: product.size,
-                                      });
+                                      fullProductName(
+                                        {
+                                          name:
+                                            product.name,
+
+                                          flavor:
+                                            product.flavor,
+
+                                          size:
+                                            product.size,
+                                        }
+                                      );
 
                                     return (
                                       <li
@@ -1201,14 +1803,24 @@ const Header: React.FC<{ title?: string }> = ({
                                         <button
                                           type="button"
                                           onClick={() =>
-                                            goToProduct({
-                                              id: product.id,
-                                              name: product.name,
-                                              slug: product.slug,
-                                              flavor:
-                                                product.flavor,
-                                              size: product.size,
-                                            })
+                                            goToProduct(
+                                              {
+                                                id:
+                                                  product.id,
+
+                                                name:
+                                                  product.name,
+
+                                                slug:
+                                                  product.slug,
+
+                                                flavor:
+                                                  product.flavor,
+
+                                                size:
+                                                  product.size,
+                                              }
+                                            )
                                           }
                                           className="
                                             flex w-full
@@ -1222,7 +1834,9 @@ const Header: React.FC<{ title?: string }> = ({
                                           "
                                         >
                                           <span className="font-medium text-gray-800">
-                                            {label}
+                                            {
+                                              label
+                                            }
                                           </span>
 
                                           <span className="text-xs text-gray-400">
@@ -1245,7 +1859,10 @@ const Header: React.FC<{ title?: string }> = ({
           )}
         </div>
 
+        {/* ================================================= */}
         {/* DERECHA DEL HEADER */}
+        {/* ================================================= */}
+
         <div
           className="
             relative z-[1100]
@@ -1262,6 +1879,8 @@ const Header: React.FC<{ title?: string }> = ({
             md:p-1.5
           "
         >
+          {/* NAVEGACIÓN DESKTOP */}
+
           {!isHomePage && (
             <nav
               className="
@@ -1287,7 +1906,9 @@ const Header: React.FC<{ title?: string }> = ({
               </Link>
 
               <Link
-                to="/shopping"
+                to={
+                  shoppingHref
+                }
                 className="
                   rounded-full
                   px-4 py-2
@@ -1320,9 +1941,12 @@ const Header: React.FC<{ title?: string }> = ({
             </nav>
           )}
 
+          {/* ================================================= */}
           {/* CARRITO */}
+          {/* ================================================= */}
+
           <Link
-            to="/micesta"
+            to={cartHref}
             className={`
               relative inline-flex h-[40px] w-[40px]
               items-center justify-center
@@ -1341,16 +1965,19 @@ const Header: React.FC<{ title?: string }> = ({
               }
             `}
             aria-label={`Mi cesta${
-              cartItemCount > 0
+              cartItemCount >
+              0
                 ? `, ${cartItemCount} productos`
                 : ""
             }`}
-            title="Mi cesta"
+            title={
+              isShopifyTest
+                ? "Mi cesta Shopify"
+                : "Mi cesta"
+            }
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              id="Layer_1"
-              data-name="Layer 1"
               viewBox="0 0 24 24"
               className="h-6 w-6"
               aria-hidden="true"
@@ -1371,7 +1998,8 @@ const Header: React.FC<{ title?: string }> = ({
               />
             </svg>
 
-            {cartItemCount > 0 && (
+            {cartItemCount >
+              0 && (
               <span
                 className="
                   pointer-events-none
@@ -1386,14 +2014,18 @@ const Header: React.FC<{ title?: string }> = ({
                   shadow-md
                 "
               >
-                {cartItemCount > 99
+                {cartItemCount >
+                99
                   ? "99+"
                   : cartItemCount}
               </span>
             )}
           </Link>
 
+          {/* ================================================= */}
           {/* FAVORITOS */}
+          {/* ================================================= */}
+
           <Link
             to="/favoritos"
             className="
@@ -1409,7 +2041,8 @@ const Header: React.FC<{ title?: string }> = ({
               active:translate-y-0
             "
             aria-label={
-              favoriteCount > 0
+              favoriteCount >
+              0
                 ? `Mis favoritos, ${favoriteCount} productos`
                 : "Mis favoritos"
             }
@@ -1417,7 +2050,6 @@ const Header: React.FC<{ title?: string }> = ({
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              id="Outline"
               viewBox="0 0 24 24"
               className="h-6 w-6"
               aria-hidden="true"
@@ -1428,7 +2060,8 @@ const Header: React.FC<{ title?: string }> = ({
               />
             </svg>
 
-            {favoriteCount > 0 && (
+            {favoriteCount >
+              0 && (
               <span
                 className="
                   pointer-events-none
@@ -1443,24 +2076,35 @@ const Header: React.FC<{ title?: string }> = ({
                   shadow-md
                 "
               >
-                {favoriteCount > 99
+                {favoriteCount >
+                99
                   ? "99+"
                   : favoriteCount}
               </span>
             )}
           </Link>
 
+          {/* ================================================= */}
           {/* USUARIO */}
+          {/* ================================================= */}
+
           <div className="relative inline-flex">
             <button
-              ref={userBtnRef}
+              ref={
+                userBtnRef
+              }
               type="button"
               aria-label="Usuario"
-              aria-expanded={userMenuOpen}
+              aria-expanded={
+                userMenuOpen
+              }
               aria-haspopup="menu"
               onClick={() =>
                 setUserMenuOpen(
-                  (current) => !current
+                  (
+                    current
+                  ) =>
+                    !current
                 )
               }
               className="
@@ -1481,8 +2125,6 @@ const Header: React.FC<{ title?: string }> = ({
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                id="Layer_1"
-                data-name="Layer 1"
                 viewBox="0 0 24 24"
                 className="h-6 w-6"
                 aria-hidden="true"
@@ -1495,7 +2137,9 @@ const Header: React.FC<{ title?: string }> = ({
             </button>
 
             <div
-              ref={userMenuRef}
+              ref={
+                userMenuRef
+              }
               role="menu"
               className={`
                 absolute right-0 top-full z-[9999]
@@ -1527,7 +2171,9 @@ const Header: React.FC<{ title?: string }> = ({
                       to="/perfil"
                       role="menuitem"
                       onClick={() =>
-                        setUserMenuOpen(false)
+                        setUserMenuOpen(
+                          false
+                        )
                       }
                       className="
                         flex w-full items-center
@@ -1545,7 +2191,9 @@ const Header: React.FC<{ title?: string }> = ({
                       to="/favoritos"
                       role="menuitem"
                       onClick={() =>
-                        setUserMenuOpen(false)
+                        setUserMenuOpen(
+                          false
+                        )
                       }
                       className="
                         flex w-full items-center
@@ -1564,7 +2212,9 @@ const Header: React.FC<{ title?: string }> = ({
                         to="/admin/pedidos"
                         role="menuitem"
                         onClick={() =>
-                          setUserMenuOpen(false)
+                          setUserMenuOpen(
+                            false
+                          )
                         }
                         className="
                           flex w-full items-center
@@ -1585,7 +2235,9 @@ const Header: React.FC<{ title?: string }> = ({
                         to="/modificarproductos"
                         role="menuitem"
                         onClick={() =>
-                          setUserMenuOpen(false)
+                          setUserMenuOpen(
+                            false
+                          )
                         }
                         className="
                           flex w-full items-center
@@ -1606,7 +2258,9 @@ const Header: React.FC<{ title?: string }> = ({
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={handleLogout}
+                      onClick={
+                        handleLogout
+                      }
                       className="
                         flex w-full items-center
                         rounded-md px-3 py-2
@@ -1624,7 +2278,9 @@ const Header: React.FC<{ title?: string }> = ({
                     to="/usuario"
                     role="menuitem"
                     onClick={() =>
-                      setUserMenuOpen(false)
+                      setUserMenuOpen(
+                        false
+                      )
                     }
                     className="
                       flex w-full items-center
@@ -1643,7 +2299,10 @@ const Header: React.FC<{ title?: string }> = ({
           </div>
         </div>
 
-        {/* NAVEGACIÓN MÓVIL EN PÁGINAS INTERNAS */}
+        {/* ================================================= */}
+        {/* NAVEGACIÓN MÓVIL */}
+        {/* ================================================= */}
+
         {!isHomePage && (
           <nav
             className="
@@ -1665,7 +2324,9 @@ const Header: React.FC<{ title?: string }> = ({
             </Link>
 
             <Link
-              to="/shopping"
+              to={
+                shoppingHref
+              }
               className="
                 transition-colors
                 hover:text-green-600
