@@ -608,7 +608,7 @@ async function generateOrderPdf(args: {
 
   draw("¿NECESITAS AYUDA CON TU PEDIDO?", M + 12, y - 20, 9.5, true, C.greenDark);
   draw(
-    "Email: saminatura369@gmail.com  ·  Teléfono: +34 631 415 075",
+    "Email: saminatura202369@gmail.com  ·  Teléfono: +34 631 415 075",
     M + 12,
     y - 39,
     8.2,
@@ -972,8 +972,8 @@ async function sendOrderEmailWithPdf(args: {
 
                             <div style="font-size:12px;line-height:1.8;color:#6f7b67;margin-top:8px;">
                               Email:
-                              <a href="mailto:saminatura369@gmail.com" style="color:#425530;text-decoration:none;font-weight:700;">
-                                saminatura369@gmail.com
+                              <a href="mailto:saminatura202369@gmail.com" style="color:#425530;text-decoration:none;font-weight:700;">
+                                saminatura202369@gmail.com
                               </a>
                               <br />
                               Teléfono:

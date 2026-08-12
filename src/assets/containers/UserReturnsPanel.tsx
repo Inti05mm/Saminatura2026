@@ -7,6 +7,10 @@ import {
 import { supabase } from "../supabaseClient";
 import { useUser } from "./useUser";
 
+/* =========================================================
+   TIPOS
+========================================================= */
+
 type OrderItem = {
   id: string;
   product_id: number;
@@ -27,45 +31,34 @@ type PublicProductRow = {
 type Order = {
   id: string;
   created_at: string | null;
-  status: string;
+  paid_at: string | null;
+  delivered_at: string | null;
+  status: "pending" | "paid" | "cancelled";
   total_amount: number;
+
   order_items: OrderItem[];
 };
 
-type ReturnReason =
+type RequestType =
   | ""
   | "withdrawal"
+  | "incident";
+
+type IncidentReason =
+  | ""
   | "damaged"
   | "bad_condition"
   | "wrong_product"
   | "missing"
   | "other";
 
-type SealedStatus =
-  | ""
-  | "yes"
-  | "no"
-  | "not_applicable";
+type ContactChannel =
+  | "whatsapp"
+  | "email";
 
-type ReturnItemForm = {
-  selected: boolean;
-  quantity: number;
-  reason: ReturnReason;
-  description: string;
-  sealed_status: SealedStatus;
-};
-
-type ReturnForms = Record<
-  string,
-  ReturnItemForm
->;
-
-type ExistingRequest = {
-  id: string;
-  order_id: string;
-  status: string;
-  created_at: string;
-};
+/* =========================================================
+   HELPERS
+========================================================= */
 
 const formatEUR = (value: number) =>
   new Intl.NumberFormat("es-ES", {
@@ -96,501 +89,929 @@ function formatDate(
   ).format(date);
 }
 
-function requestStatusLabel(
-  status: string
+function getDaysSinceDelivery(
+  deliveredAt?: string | null
 ) {
-  if (status === "pending") {
-    return "Pendiente de revisión";
+  if (!deliveredAt) {
+    return null;
   }
 
-  if (status === "reviewing") {
-    return "En revisión";
-  }
-
-  if (status === "approved") {
-    return "Aprobada";
-  }
+  const deliveredDate =
+    new Date(deliveredAt);
 
   if (
-    status === "partially_approved"
+    Number.isNaN(
+      deliveredDate.getTime()
+    )
   ) {
-    return "Parcialmente aprobada";
+    return null;
   }
 
-  if (status === "rejected") {
-    return "Rechazada";
-  }
+  const difference =
+    Date.now() -
+    deliveredDate.getTime();
 
-  if (status === "refunded") {
-    return "Reembolsada";
-  }
-
-  if (status === "closed") {
-    return "Cerrada";
-  }
-
-  return status;
+  return Math.floor(
+    difference /
+      (1000 * 60 * 60 * 24)
+  );
 }
 
-function requestStatusClass(
-  status: string
+function getIncidentReasonLabel(
+  reason: IncidentReason
 ) {
-  if (status === "pending") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
+  switch (reason) {
+    case "damaged":
+      return "El producto ha llegado dañado";
 
-  if (status === "reviewing") {
-    return "border-blue-200 bg-blue-50 text-blue-700";
-  }
+    case "bad_condition":
+      return "El producto ha llegado en mal estado";
 
-  if (
-    status === "approved" ||
-    status === "refunded"
-  ) {
-    return "border-green-200 bg-green-50 text-green-700";
-  }
+    case "wrong_product":
+      return "He recibido un producto incorrecto";
 
-  if (status === "rejected") {
-    return "border-red-200 bg-red-50 text-red-700";
-  }
+    case "missing":
+      return "Falta un producto o una unidad";
 
-  return "border-[#d6ddcf] bg-[#f5f7f2] text-[#5e6957]";
+    case "other":
+      return "Otro problema";
+
+    default:
+      return "";
+  }
 }
+
+/* =========================================================
+   COMPONENTE
+========================================================= */
 
 export default function UserReturnsPanel() {
   const { user } = useUser();
 
-  const [orders, setOrders] =
+  const [
+    orders,
+    setOrders,
+  ] =
     useState<Order[]>([]);
 
   const [
-    existingRequests,
-    setExistingRequests,
-  ] = useState<ExistingRequest[]>([]);
+    profileName,
+    setProfileName,
+  ] = useState("");
 
   const [
     selectedOrderId,
     setSelectedOrderId,
   ] = useState("");
 
-  const [forms, setForms] =
-    useState<ReturnForms>({});
+  const [
+    selectedItemId,
+    setSelectedItemId,
+  ] = useState("");
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    selectedQuantity,
+    setSelectedQuantity,
+  ] = useState(1);
 
-  const [submitting, setSubmitting] =
-    useState(false);
+  const [
+    requestType,
+    setRequestType,
+  ] =
+    useState<RequestType>("");
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [
+    incidentReason,
+    setIncidentReason,
+  ] =
+    useState<IncidentReason>("");
 
-  const [success, setSuccess] =
-    useState<string | null>(null);
+  const [
+    incidentDescription,
+    setIncidentDescription,
+  ] = useState("");
 
-  const selectedOrder = useMemo(
-    () =>
-      orders.find(
-        (order) =>
-          order.id === selectedOrderId
-      ) ?? null,
-    [orders, selectedOrderId]
-  );
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const selectedItems = useMemo(
-    () =>
-      selectedOrder?.order_items.filter(
-        (item) =>
-          forms[item.id]?.selected
-      ) ?? [],
-    [selectedOrder, forms]
-  );
-
-  const loadRequests = async () => {
-    if (!user) return;
-
-    const { data, error } =
-      await supabase
-        .from("return_requests")
-        .select(
-          "id, order_id, status, created_at"
-        )
-        .eq("user_id", user.id)
-        .order("created_at", {
-          ascending: false,
-        });
-
-    if (error) {
-      console.error(
-        "Error cargando devoluciones:",
-        error
-      );
-      return;
-    }
-
-    setExistingRequests(
-      (data ?? []) as ExistingRequest[]
-    );
-  };
-
-  const loadData = async () => {
-    if (!user) {
-      setOrders([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    /*
-     * Cargamos únicamente pedidos
-     * que ya han sido pagados o preparados.
-     */
-    const {
-      data,
-      error: ordersError,
-    } = await supabase
-      .from("orders")
-      .select(
-        `
-          id,
-          created_at,
-          status,
-          total_amount,
-          order_items (
-            id,
-            product_id,
-            product_name,
-            quantity,
-            unit_price
-          )
-        `
-      )
-      .eq("user_id", user.id)
-      .in("status", [
-        "paid",
-        "fulfilled",
-      ])
-      .order("created_at", {
-        ascending: false,
-      });
-
-    if (ordersError) {
-      setError(
-        "No se han podido cargar tus pedidos: " +
-          ordersError.message
-      );
-
-      setLoading(false);
-      return;
-    }
-
-    const rows =
-      (data ?? []) as unknown as Order[];
-
-    /*
-     * Igual que en UserPedidosPanel:
-     * añadimos imagen y marca.
-     */
-    const productIds = Array.from(
-      new Set(
-        rows.flatMap((order) =>
-          (
-            order.order_items ?? []
-          ).map((item) =>
-            Number(item.product_id)
-          )
-        )
-      )
-    ).filter((id) =>
-      Number.isFinite(id)
+  /* Errores de Supabase / carga */
+  const [
+    error,
+    setError,
+  ] =
+    useState<string | null>(
+      null
     );
 
-    let productsMap = new Map<
-      number,
-      PublicProductRow
-    >();
+  /*
+   * NUEVO:
+   * aviso de formulario.
+   *
+   * Este es el mensaje que aparecerá junto
+   * a los botones cuando el usuario intente
+   * continuar sin completar algo obligatorio.
+   */
+  const [
+    formError,
+    setFormError,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-    if (productIds.length > 0) {
-      const {
-        data: productsData,
-        error: productsError,
-      } = await supabase
-        .from("public_products")
-        .select("id, img, brand")
-        .in("id", productIds);
+  const [
+    savingRequest,
+    setSavingRequest,
+  ] = useState(false);
 
-      if (!productsError) {
-        productsMap = new Map(
-          (
-            (productsData ??
-              []) as PublicProductRow[]
-          ).map((product) => [
-            Number(product.id),
-            product,
-          ])
-        );
-      }
-    }
+  const [
+    savedRequestId,
+    setSavedRequestId,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-    const enrichedOrders =
-      rows.map((order) => ({
-        ...order,
+  /* =======================================================
+     DERIVADOS
+  ======================================================= */
 
-        order_items:
-          (
-            order.order_items ?? []
-          ).map((item) => {
-            const product =
-              productsMap.get(
-                Number(
-                  item.product_id
-                )
-              );
+  const selectedOrder =
+    useMemo(
+      () =>
+        orders.find(
+          (order) =>
+            order.id ===
+            selectedOrderId
+        ) ?? null,
+      [
+        orders,
+        selectedOrderId,
+      ]
+    );
 
-            return {
-              ...item,
-              product_img:
-                product?.img ??
-                null,
-              product_brand:
-                product?.brand ??
-                null,
-            };
-          }),
-      }));
+  const selectedItem =
+    useMemo(
+      () =>
+        selectedOrder?.order_items.find(
+          (item) =>
+            item.id ===
+            selectedItemId
+        ) ?? null,
+      [
+        selectedOrder,
+        selectedItemId,
+      ]
+    );
 
-    setOrders(enrichedOrders);
+  const daysSinceDelivery =
+    useMemo(
+      () =>
+        selectedOrder
+          ? getDaysSinceDelivery(
+              selectedOrder.delivered_at
+            )
+          : null,
+      [selectedOrder]
+    );
 
-    await loadRequests();
+  const canWithdraw =
+    daysSinceDelivery !== null &&
+    daysSinceDelivery >= 0 &&
+    daysSinceDelivery <= 14;
 
-    setLoading(false);
-  };
+  /* =======================================================
+     CARGAR DATOS
+  ======================================================= */
 
   useEffect(() => {
+    const loadData = async () => {
+      if (!user) {
+        setOrders([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      /* Nombre del usuario */
+      const profileResult =
+        await supabase
+          .from("profiles")
+          .select(
+            "first_name, last_name"
+          )
+          .eq("id", user.id)
+          .maybeSingle();
+
+      if (
+        !profileResult.error
+      ) {
+        const firstName =
+          String(
+            profileResult.data
+              ?.first_name ?? ""
+          ).trim();
+
+        const lastName =
+          String(
+            profileResult.data
+              ?.last_name ?? ""
+          ).trim();
+
+        setProfileName(
+          [
+            firstName,
+            lastName,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+      }
+
+      const {
+        data,
+        error: ordersError,
+      } =
+        await supabase
+          .from("orders")
+          .select(
+            `
+              id,
+              created_at,
+              paid_at,
+              delivered_at,
+              status,
+              total_amount,
+
+              order_items (
+                id,
+                product_id,
+                product_name,
+                quantity,
+                unit_price
+              )
+            `
+          )
+          .eq(
+            "user_id",
+            user.id
+          )
+          .eq(
+            "status",
+            "paid"
+          )
+          .order(
+            "created_at",
+            {
+              ascending: false,
+            }
+          );
+
+      if (ordersError) {
+        setError(
+          "No se han podido cargar tus pedidos: " +
+            ordersError.message
+        );
+
+        setOrders([]);
+        setLoading(false);
+        return;
+      }
+
+      const rows =
+        (
+          data ?? []
+        ) as unknown as Order[];
+
+      const productIds =
+        Array.from(
+          new Set(
+            rows.flatMap(
+              (order) =>
+                (
+                  order.order_items ??
+                  []
+                )
+                  .map(
+                    (item) =>
+                      Number(
+                        item.product_id
+                      )
+                  )
+                  .filter(
+                    (id) =>
+                      Number.isFinite(
+                        id
+                      )
+                  )
+            )
+          )
+        );
+
+      let productsMap =
+        new Map<
+          number,
+          PublicProductRow
+        >();
+
+      if (
+        productIds.length > 0
+      ) {
+        const {
+          data: productsData,
+          error: productsError,
+        } =
+          await supabase
+            .from(
+              "public_products"
+            )
+            .select(
+              "id, img, brand"
+            )
+            .in(
+              "id",
+              productIds
+            );
+
+        if (!productsError) {
+          productsMap =
+            new Map(
+              (
+                (
+                  productsData ??
+                  []
+                ) as PublicProductRow[]
+              ).map(
+                (product) => [
+                  Number(
+                    product.id
+                  ),
+                  product,
+                ]
+              )
+            );
+        }
+      }
+
+      const enrichedOrders =
+        rows.map(
+          (order) => ({
+            ...order,
+
+            order_items:
+              (
+                order.order_items ??
+                []
+              ).map(
+                (item) => {
+                  const product =
+                    productsMap.get(
+                      Number(
+                        item.product_id
+                      )
+                    );
+
+                  return {
+                    ...item,
+
+                    product_img:
+                      product?.img ??
+                      null,
+
+                    product_brand:
+                      product?.brand ??
+                      null,
+                  };
+                }
+              ),
+          })
+        );
+
+      setOrders(
+        enrichedOrders
+      );
+
+      setLoading(false);
+    };
+
     void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user]);
+
+  /* =======================================================
+     SELECCIONES
+  ======================================================= */
+
+  const resetSavedRequest =
+    () => {
+      setSavedRequestId(
+        null
+      );
+  };
 
   const selectOrder = (
     order: Order
   ) => {
-    setSelectedOrderId(order.id);
-    setError(null);
-    setSuccess(null);
-
-    const nextForms: ReturnForms =
-      {};
-
-    order.order_items.forEach(
-      (item) => {
-        nextForms[item.id] = {
-          selected: false,
-          quantity: 1,
-          reason: "",
-          description: "",
-          sealed_status: "",
-        };
-      }
+    setSelectedOrderId(
+      order.id
     );
 
-    setForms(nextForms);
+    setSelectedItemId("");
+    setSelectedQuantity(1);
+    setRequestType("");
+    setIncidentReason("");
+    setIncidentDescription("");
+
+    resetSavedRequest();
+
+    setError(null);
+    setFormError(null);
   };
 
-  const updateForm = (
-    itemId: string,
-    patch: Partial<ReturnItemForm>
+  const selectProduct = (
+    item: OrderItem
   ) => {
-    setForms((current) => ({
-      ...current,
-
-      [itemId]: {
-        ...current[itemId],
-        ...patch,
-      },
-    }));
-  };
-
-  const submitRequest = async () => {
-    if (
-      !user ||
-      !selectedOrder
-    ) {
-      return;
-    }
-
-    setError(null);
-    setSuccess(null);
-
-    if (
-      selectedItems.length === 0
-    ) {
-      setError(
-        "Selecciona al menos un producto."
-      );
-
-      return;
-    }
-
-    for (const item of selectedItems) {
-      const form = forms[item.id];
-
-      if (!form?.reason) {
-        setError(
-          `Selecciona el motivo para "${item.product_name}".`
-        );
-
-        return;
-      }
-
-      if (
-        form.quantity < 1 ||
-        form.quantity >
-          item.quantity
-      ) {
-        setError(
-          `La cantidad seleccionada para "${item.product_name}" no es válida.`
-        );
-
-        return;
-      }
-
-      if (
-        form.reason ===
-          "withdrawal" &&
-        !form.sealed_status
-      ) {
-        setError(
-          `Indica el estado de "${item.product_name}".`
-        );
-
-        return;
-      }
-
-      if (
-        form.reason ===
-          "other" &&
-        !form.description.trim()
-      ) {
-        setError(
-          `Describe el motivo de la devolución de "${item.product_name}".`
-        );
-
-        return;
-      }
-    }
-
-    setSubmitting(true);
-
-    /*
-     * 1. Creamos la solicitud general.
-     */
-    const {
-      data: request,
-      error: requestError,
-    } = await supabase
-      .from("return_requests")
-      .insert({
-        user_id: user.id,
-        order_id:
-          selectedOrder.id,
-        status: "pending",
-      })
-      .select("id")
-      .single();
-
-    if (
-      requestError ||
-      !request
-    ) {
-      setSubmitting(false);
-
-      setError(
-        "No se ha podido crear la solicitud: " +
-          (
-            requestError?.message ??
-            "Error desconocido"
-          )
-      );
-
-      return;
-    }
-
-    /*
-     * 2. Guardamos los productos.
-     */
-    const payload =
-      selectedItems.map((item) => {
-        const form =
-          forms[item.id];
-
-        return {
-          return_request_id:
-            request.id,
-
-          order_item_id:
-            item.id,
-
-          product_id:
-            item.product_id,
-
-          product_name:
-            item.product_name,
-
-          unit_price:
-            Number(
-              item.unit_price
-            ),
-
-          quantity:
-            form.quantity,
-
-          reason:
-            form.reason,
-
-          description:
-            form.description.trim() ||
-            null,
-
-          sealed_status:
-            form.reason ===
-            "withdrawal"
-              ? form.sealed_status
-              : null,
-
-          status: "pending",
-        };
-      });
-
-    const {
-      error: itemsError,
-    } = await supabase
-      .from(
-        "return_request_items"
-      )
-      .insert(payload);
-
-    setSubmitting(false);
-
-    if (itemsError) {
-      setError(
-        "La solicitud se creó, pero hubo un problema guardando los productos: " +
-          itemsError.message
-      );
-
-      return;
-    }
-
-    setSuccess(
-      "Tu solicitud se ha enviado correctamente. La revisaremos antes de aprobarla."
+    setSelectedItemId(
+      item.id
     );
 
-    setSelectedOrderId("");
-    setForms({});
+    setSelectedQuantity(1);
+    setRequestType("");
+    setIncidentReason("");
+    setIncidentDescription("");
 
-    await loadRequests();
+    resetSavedRequest();
+
+    setError(null);
+    setFormError(null);
   };
+
+  /* =======================================================
+     VALIDACIÓN
+  ======================================================= */
+
+  const validateRequest =
+    () => {
+      /*
+       * Borramos el mensaje anterior y
+       * comprobamos otra vez.
+       */
+      setFormError(null);
+
+      if (!selectedOrder) {
+        setFormError(
+          "Selecciona un pedido antes de continuar."
+        );
+
+        return false;
+      }
+
+      if (!selectedItem) {
+        setFormError(
+          "Selecciona el producto que quieres gestionar."
+        );
+
+        return false;
+      }
+
+      if (!requestType) {
+        setFormError(
+          "Selecciona si quieres realizar un desistimiento o comunicar una incidencia."
+        );
+
+        return false;
+      }
+
+      if (
+        requestType ===
+          "withdrawal" &&
+        !canWithdraw
+      ) {
+        if (
+          !selectedOrder.delivered_at
+        ) {
+          setFormError(
+            "No consta todavía la fecha de entrega del pedido."
+          );
+        } else {
+          setFormError(
+            "Este pedido aparece fuera del plazo general de 14 días desde la recepción."
+          );
+        }
+
+        return false;
+      }
+
+      /*
+       * AQUÍ ESTÁ EL CASO QUE TE PASABA:
+       * incidencia elegida pero sin motivo.
+       */
+      if (
+        requestType ===
+          "incident" &&
+        !incidentReason
+      ) {
+        setFormError(
+          "Selecciona el motivo de la incidencia antes de continuar."
+        );
+
+        return false;
+      }
+
+      /*
+       * Si ha elegido "Otro problema",
+       * tiene que explicar qué ha ocurrido.
+       */
+      if (
+        requestType ===
+          "incident" &&
+        incidentReason ===
+          "other" &&
+        !incidentDescription.trim()
+      ) {
+        setFormError(
+          'Has seleccionado "Otro problema". Escribe brevemente qué ha ocurrido antes de continuar.'
+        );
+
+        return false;
+      }
+
+      return true;
+    };
+
+  /* =======================================================
+     CREAR MENSAJE
+  ======================================================= */
+
+  const buildMessage =
+    () => {
+      if (
+        !selectedOrder ||
+        !selectedItem ||
+        !requestType
+      ) {
+        return null;
+      }
+
+      const customerName =
+        profileName ||
+        user?.email ||
+        "Cliente";
+
+      if (
+        requestType ===
+        "withdrawal"
+      ) {
+        return `Hola Saminatura.
+
+Quiero comunicar mi DESISTIMIENTO de la compra.
+
+Nombre y apellidos: ${customerName}
+Número de pedido: ${selectedOrder.id}
+Producto: ${selectedItem.product_name}
+Cantidad: ${selectedQuantity}
+Fecha de recepción: ${formatDate(
+          selectedOrder.delivered_at
+        )}
+
+Gracias.`;
+      }
+
+      const reason =
+        getIncidentReasonLabel(
+          incidentReason
+        );
+
+      return `Hola Saminatura.
+
+Quiero comunicar una INCIDENCIA con mi pedido.
+
+Nombre y apellidos: ${customerName}
+Número de pedido: ${selectedOrder.id}
+Producto: ${selectedItem.product_name}
+Cantidad: ${selectedQuantity}
+Problema: ${reason}${
+        incidentDescription.trim()
+          ? `
+
+Descripción: ${incidentDescription.trim()}`
+          : ""
+      }
+
+Adjuntaré fotografías del producto o embalaje si son necesarias.
+
+Gracias.`;
+    };
+
+  /* =======================================================
+     GUARDAR SOLICITUD EN SUPABASE
+  ======================================================= */
+
+  const saveReturnRequest =
+    async (
+      channel: ContactChannel
+    ) => {
+      if (
+        !user ||
+        !selectedOrder ||
+        !selectedItem ||
+        !requestType
+      ) {
+        return null;
+      }
+
+      /*
+       * Evita duplicados si el usuario pulsa
+       * varias veces sin cambiar la solicitud.
+       */
+      if (savedRequestId) {
+        return savedRequestId;
+      }
+
+      const message =
+        buildMessage();
+
+      if (!message) {
+        return null;
+      }
+
+      setSavingRequest(
+        true
+      );
+
+      setError(null);
+
+      /* 1. Crear solicitud general */
+      const {
+        data: request,
+        error: requestError,
+      } =
+        await supabase
+          .from(
+            "return_requests"
+          )
+          .insert({
+            user_id:
+              user.id,
+
+            order_id:
+              selectedOrder.id,
+
+            status:
+              "pending",
+
+            customer_message:
+              message,
+
+            contact_channel:
+              channel,
+
+            contact_opened_at:
+              new Date().toISOString(),
+          })
+          .select(
+            "id"
+          )
+          .single();
+
+      if (
+        requestError ||
+        !request
+      ) {
+        setSavingRequest(
+          false
+        );
+
+        setError(
+          "No se ha podido registrar la solicitud: " +
+            (
+              requestError
+                ?.message ??
+              "Error desconocido"
+            )
+        );
+
+        return null;
+      }
+
+      const reason =
+        requestType ===
+        "withdrawal"
+          ? "withdrawal"
+          : incidentReason;
+
+      /* 2. Crear item asociado */
+      const {
+        error: itemError,
+      } =
+        await supabase
+          .from(
+            "return_request_items"
+          )
+          .insert({
+            return_request_id:
+              request.id,
+
+            order_item_id:
+              selectedItem.id,
+
+            product_id:
+              selectedItem.product_id,
+
+            product_name:
+              selectedItem.product_name,
+
+            unit_price:
+              Number(
+                selectedItem.unit_price
+              ),
+
+            quantity:
+              selectedQuantity,
+
+            reason,
+
+            description:
+              requestType ===
+                "incident" &&
+              incidentDescription.trim()
+                ? incidentDescription.trim()
+                : null,
+
+            sealed_status:
+              null,
+
+            status:
+              "pending",
+          });
+
+      if (itemError) {
+        /*
+         * Rollback manual:
+         * si falla el item, eliminamos
+         * return_request.
+         */
+        await supabase
+          .from(
+            "return_requests"
+          )
+          .delete()
+          .eq(
+            "id",
+            request.id
+          )
+          .eq(
+            "user_id",
+            user.id
+          );
+
+        setSavingRequest(
+          false
+        );
+
+        setError(
+          "No se ha podido guardar el producto de la solicitud: " +
+            itemError.message
+        );
+
+        return null;
+      }
+
+      setSavedRequestId(
+        request.id
+      );
+
+      setSavingRequest(
+        false
+      );
+
+      return request.id;
+    };
+
+  /* =======================================================
+     WHATSAPP
+  ======================================================= */
+
+  const openWhatsApp =
+    async () => {
+      /*
+       * Si falta algo:
+       *
+       * - NO abre WhatsApp.
+       * - NO registra nada.
+       * - aparece formError junto a botones.
+       */
+      if (
+        !validateRequest()
+      ) {
+        return;
+      }
+
+      const message =
+        buildMessage();
+
+      if (!message) {
+        setFormError(
+          "No se ha podido preparar la solicitud. Revisa los datos."
+        );
+
+        return;
+      }
+
+      const requestId =
+        await saveReturnRequest(
+          "whatsapp"
+        );
+
+      if (!requestId) {
+        return;
+      }
+
+      const completeMessage =
+        `${message}
+
+Referencia de solicitud Saminatura: ${requestId}`;
+
+      const url =
+        "https://wa.me/34631415075?text=" +
+        encodeURIComponent(
+          completeMessage
+        );
+
+      window.open(
+        url,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    };
+
+  /* =======================================================
+     EMAIL
+  ======================================================= */
+
+  const openEmail =
+    async () => {
+      /*
+       * Mismo comportamiento que WhatsApp.
+       */
+      if (
+        !validateRequest()
+      ) {
+        return;
+      }
+
+      const message =
+        buildMessage();
+
+      if (!message) {
+        setFormError(
+          "No se ha podido preparar la solicitud. Revisa los datos."
+        );
+
+        return;
+      }
+
+      const requestId =
+        await saveReturnRequest(
+          "email"
+        );
+
+      if (!requestId) {
+        return;
+      }
+
+      const subject =
+        requestType ===
+        "withdrawal"
+          ? `DESISTIMIENTO - Pedido ${selectedOrder?.id ?? ""}`
+          : `INCIDENCIA - Pedido ${selectedOrder?.id ?? ""}`;
+
+      const completeMessage =
+        `${message}
+
+Referencia de solicitud Saminatura: ${requestId}`;
+
+      const url =
+        "mailto:saminatura369@gmail.com" +
+        "?subject=" +
+        encodeURIComponent(
+          subject
+        ) +
+        "&body=" +
+        encodeURIComponent(
+          completeMessage
+        );
+
+      window.location.href =
+        url;
+    };
+
+  /* =======================================================
+     LOADING
+  ======================================================= */
 
   if (loading) {
     return (
@@ -602,42 +1023,51 @@ export default function UserReturnsPanel() {
     );
   }
 
+  /* =======================================================
+     UI
+  ======================================================= */
+
   return (
     <section>
+      {/* CABECERA */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7d8a70]">
           Postventa
         </p>
 
         <h2 className="mt-2 text-2xl font-semibold text-[#26341f]">
-          Devoluciones
+          Devoluciones e incidencias
         </h2>
 
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[#737d6c]">
-          Selecciona uno de tus pedidos y
-          los productos sobre los que
-          quieres solicitar una devolución
-          o comunicar una incidencia.
+          Selecciona el pedido y el producto que necesitas gestionar.
+          Los datos de tu cuenta y de la compra se añadirán
+          automáticamente al mensaje que podrás enviar a Saminatura por
+          WhatsApp o correo electrónico.
         </p>
       </div>
 
+      {/* ERROR TÉCNICO */}
       {error && (
         <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {success && (
-        <div className="mt-6 rounded-xl border border-[#cadabd] bg-[#f2f7ee] px-4 py-3 text-sm text-[#34502a]">
-          {success}
-        </div>
-      )}
+      {/* ===================================================
+          1. PEDIDO
+      =================================================== */}
 
-      {/* PEDIDOS */}
       <div className="mt-8">
-        <h3 className="text-base font-semibold text-[#34412d]">
-          1. Selecciona un pedido
-        </h3>
+        <div className="flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#425530] text-xs font-semibold text-white">
+            1
+          </span>
+
+          <h3 className="text-base font-semibold text-[#34412d]">
+            Selecciona un pedido
+          </h3>
+        </div>
 
         {orders.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-dashed border-[#ccd5c3] bg-[#fafbf8] p-8 text-center">
@@ -646,463 +1076,642 @@ export default function UserReturnsPanel() {
             </p>
 
             <p className="mt-2 text-sm text-[#788170]">
-              Los pedidos pagados aparecerán aquí.
+              Tus pedidos pagados aparecerán aquí.
             </p>
           </div>
         ) : (
           <div className="mt-4 grid gap-3">
-            {orders.map((order) => {
-              const selected =
-                selectedOrderId ===
-                order.id;
+            {orders.map(
+              (order) => {
+                const selected =
+                  selectedOrderId ===
+                  order.id;
 
-              return (
-                <button
-                  key={order.id}
-                  type="button"
-                  onClick={() =>
-                    selectOrder(
-                      order
-                    )
-                  }
-                  className={`rounded-2xl border p-4 text-left transition ${
-                    selected
-                      ? "border-[#718360] bg-[#f3f6ef]"
-                      : "border-[#dce2d5] bg-white hover:bg-[#fafbf8]"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#8a9383]">
-                        Pedido
-                      </p>
+                const days =
+                  getDaysSinceDelivery(
+                    order.delivered_at
+                  );
 
-                      <p className="mt-1 break-all text-sm font-semibold text-[#2b3625]">
-                        {order.id}
-                      </p>
-
-                      <p className="mt-2 text-xs text-[#788170]">
-                        {formatDate(
-                          order.created_at
-                        )}
-                      </p>
-                    </div>
-
-                    <div className="text-right">
-                      <p className="font-semibold text-[#2f431f]">
-                        {formatEUR(
-                          Number(
-                            order.total_amount
-                          )
-                        )}
-                      </p>
-
-                      {selected && (
-                        <span className="mt-2 inline-flex rounded-full bg-[#425530] px-2.5 py-1 text-[11px] font-semibold text-white">
-                          Seleccionado
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* PRODUCTOS */}
-      {selectedOrder && (
-        <div className="mt-10">
-          <h3 className="text-base font-semibold text-[#34412d]">
-            2. Elige los productos
-          </h3>
-
-          <p className="mt-1 text-sm text-[#788170]">
-            Puedes incluir varios productos en
-            una misma solicitud.
-          </p>
-
-          <div className="mt-4 space-y-4">
-            {selectedOrder.order_items.map(
-              (item) => {
-                const form =
-                  forms[item.id];
-
-                if (!form) {
-                  return null;
-                }
+                const withdrawalAvailable =
+                  days !== null &&
+                  days >= 0 &&
+                  days <= 14;
 
                 return (
-                  <article
-                    key={item.id}
-                    className={`rounded-2xl border p-5 transition ${
-                      form.selected
-                        ? "border-[#718360] bg-[#f8faf6]"
-                        : "border-[#dce2d5] bg-white"
+                  <button
+                    key={order.id}
+                    type="button"
+                    onClick={() =>
+                      selectOrder(
+                        order
+                      )
+                    }
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      selected
+                        ? "border-[#718360] bg-[#f3f6ef]"
+                        : "border-[#dce2d5] bg-white hover:bg-[#fafbf8]"
                     }`}
                   >
-                    <label className="flex cursor-pointer items-start gap-4">
-                      <input
-                        type="checkbox"
-                        checked={
-                          form.selected
-                        }
-                        onChange={(
-                          event
-                        ) =>
-                          updateForm(
-                            item.id,
-                            {
-                              selected:
-                                event
-                                  .target
-                                  .checked,
-                            }
-                          )
-                        }
-                        className="mt-5 h-4 w-4"
-                      />
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#8a9383]">
+                          Pedido
+                        </p>
 
-                      {item.product_img ? (
-                        <img
-                          src={
-                            item.product_img
-                          }
-                          alt={
-                            item.product_name
-                          }
-                          className="h-20 w-20 shrink-0 rounded-xl border border-[#e1e6db] bg-white object-contain p-2"
-                        />
-                      ) : (
-                        <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-[#e1e6db] bg-[#f4f5f1] text-xs text-[#92998c]">
-                          Sin imagen
+                        <p className="mt-1 break-all text-sm font-semibold text-[#2b3625]">
+                          {order.id}
+                        </p>
+
+                        <p className="mt-2 text-xs text-[#788170]">
+                          Realizado:{" "}
+                          {formatDate(
+                            order.created_at
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-[#788170]">
+                          Entregado:{" "}
+                          {formatDate(
+                            order.delivered_at
+                          )}
+                        </p>
+
+                        <div className="mt-3">
+                          {!order.delivered_at ? (
+                            <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                              Entrega pendiente de registrar
+                            </span>
+                          ) : withdrawalAvailable ? (
+                            <span className="inline-flex rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700">
+                              Dentro del plazo general de desistimiento
+                            </span>
+                          ) : (
+                            <span className="inline-flex rounded-full border border-[#ddd8ce] bg-[#f7f5ef] px-2.5 py-1 text-[11px] font-semibold text-[#777266]">
+                              Plazo general de desistimiento finalizado
+                            </span>
+                          )}
                         </div>
-                      )}
+                      </div>
 
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-[#2b3625]">
-                          {
-                            item.product_name
-                          }
-                        </p>
-
-                        {item.product_brand && (
-                          <p className="mt-1 text-xs text-[#8a9383]">
-                            {
-                              item.product_brand
-                            }
-                          </p>
-                        )}
-
-                        <p className="mt-2 text-sm text-[#788170]">
-                          Compraste{" "}
-                          {item.quantity}{" "}
-                          {item.quantity ===
-                          1
-                            ? "unidad"
-                            : "unidades"}
-                        </p>
-
-                        <p className="mt-1 text-sm font-semibold text-[#425530]">
+                      <div className="text-right">
+                        <p className="font-semibold text-[#2f431f]">
                           {formatEUR(
                             Number(
-                              item.unit_price
+                              order.total_amount
                             )
-                          )}{" "}
-                          / unidad
+                          )}
                         </p>
-                      </div>
-                    </label>
 
-                    {form.selected && (
-                      <div className="mt-5 grid gap-5 border-t border-[#e2e7dd] pt-5 sm:grid-cols-2">
-                        <div>
-                          <label className="block text-sm font-semibold text-[#34412d]">
-                            Cantidad
-                          </label>
-
-                          <select
-                            value={
-                              form.quantity
-                            }
-                            onChange={(
-                              event
-                            ) =>
-                              updateForm(
-                                item.id,
-                                {
-                                  quantity:
-                                    Number(
-                                      event
-                                        .target
-                                        .value
-                                    ),
-                                }
-                              )
-                            }
-                            className="mt-2 w-full rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none focus:border-[#718360]"
-                          >
-                            {Array.from(
-                              {
-                                length:
-                                  item.quantity,
-                              },
-                              (_, index) =>
-                                index + 1
-                            ).map(
-                              (quantity) => (
-                                <option
-                                  key={
-                                    quantity
-                                  }
-                                  value={
-                                    quantity
-                                  }
-                                >
-                                  {
-                                    quantity
-                                  }
-                                </option>
-                              )
-                            )}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-semibold text-[#34412d]">
-                            Motivo
-                          </label>
-
-                          <select
-                            value={
-                              form.reason
-                            }
-                            onChange={(
-                              event
-                            ) =>
-                              updateForm(
-                                item.id,
-                                {
-                                  reason:
-                                    event
-                                      .target
-                                      .value as ReturnReason,
-
-                                  sealed_status:
-                                    "",
-                                }
-                              )
-                            }
-                            className="mt-2 w-full rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none focus:border-[#718360]"
-                          >
-                            <option value="">
-                              Selecciona un motivo
-                            </option>
-
-                            <option value="withdrawal">
-                              He cambiado de opinión
-                            </option>
-
-                            <option value="damaged">
-                              El producto ha llegado dañado
-                            </option>
-
-                            <option value="bad_condition">
-                              El producto ha llegado en mal estado
-                            </option>
-
-                            <option value="wrong_product">
-                              He recibido un producto incorrecto
-                            </option>
-
-                            <option value="missing">
-                              Falta un producto o una unidad
-                            </option>
-
-                            <option value="other">
-                              Otro motivo
-                            </option>
-                          </select>
-                        </div>
-
-                        {form.reason ===
-                          "withdrawal" && (
-                          <div className="sm:col-span-2">
-                            <label className="block text-sm font-semibold text-[#34412d]">
-                              Estado del producto
-                            </label>
-
-                            <select
-                              value={
-                                form.sealed_status
-                              }
-                              onChange={(
-                                event
-                              ) =>
-                                updateForm(
-                                  item.id,
-                                  {
-                                    sealed_status:
-                                      event
-                                        .target
-                                        .value as SealedStatus,
-                                  }
-                                )
-                              }
-                              className="mt-2 w-full rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none focus:border-[#718360]"
-                            >
-                              <option value="">
-                                Selecciona el estado
-                              </option>
-
-                              <option value="yes">
-                                Cerrado y con el precinto intacto
-                              </option>
-
-                              <option value="no">
-                                Abierto o desprecintado
-                              </option>
-
-                              <option value="not_applicable">
-                                No tiene precinto / no aplica
-                              </option>
-                            </select>
-                          </div>
+                        {selected && (
+                          <span className="mt-2 inline-flex rounded-full bg-[#425530] px-2.5 py-1 text-[11px] font-semibold text-white">
+                            Seleccionado
+                          </span>
                         )}
-
-                        <div className="sm:col-span-2">
-                          <label className="block text-sm font-semibold text-[#34412d]">
-                            Información adicional
-                          </label>
-
-                          <textarea
-                            rows={3}
-                            value={
-                              form.description
-                            }
-                            onChange={(
-                              event
-                            ) =>
-                              updateForm(
-                                item.id,
-                                {
-                                  description:
-                                    event
-                                      .target
-                                      .value,
-                                }
-                              )
-                            }
-                            placeholder="Cuéntanos brevemente qué ha ocurrido..."
-                            className="mt-2 w-full resize-none rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none placeholder:text-[#a1a99b] focus:border-[#718360]"
-                          />
-                        </div>
                       </div>
-                    )}
-                  </article>
+                    </div>
+                  </button>
                 );
               }
             )}
           </div>
+        )}
+      </div>
 
-          <div className="mt-6 rounded-2xl border border-[#dce3d5] bg-[#f7f9f5] p-4">
-            <p className="text-xs leading-5 text-[#697361]">
-              El envío de una solicitud no
-              supone su aprobación automática.
-              Revisaremos el motivo, el estado
-              del producto y las condiciones
-              aplicables antes de comunicarte
-              la resolución.
-            </p>
+      {/* ===================================================
+          2. PRODUCTO
+      =================================================== */}
+
+      {selectedOrder && (
+        <div className="mt-10">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#425530] text-xs font-semibold text-white">
+              2
+            </span>
+
+            <h3 className="text-base font-semibold text-[#34412d]">
+              Selecciona el producto
+            </h3>
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              void submitRequest()
-            }
-            disabled={
-              submitting ||
-              selectedItems.length === 0
-            }
-            className="mt-6 rounded-xl bg-[#425530] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting
-              ? "Enviando solicitud…"
-              : `Enviar solicitud${
-                  selectedItems.length >
-                  0
-                    ? ` (${selectedItems.length})`
-                    : ""
-                }`}
-          </button>
-        </div>
-      )}
+          <div className="mt-4 grid gap-3">
+            {selectedOrder.order_items.map(
+              (item) => {
+                const selected =
+                  selectedItemId ===
+                  item.id;
 
-      {/* SOLICITUDES YA ENVIADAS */}
-      <div className="mt-12 border-t border-[#dde3d7] pt-8">
-        <h3 className="text-lg font-semibold text-[#2d3a26]">
-          Mis solicitudes
-        </h3>
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() =>
+                      selectProduct(
+                        item
+                      )
+                    }
+                    className={`flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition ${
+                      selected
+                        ? "border-[#718360] bg-[#f3f6ef]"
+                        : "border-[#dce2d5] bg-white hover:bg-[#fafbf8]"
+                    }`}
+                  >
+                    {item.product_img ? (
+                      <img
+                        src={
+                          item.product_img
+                        }
+                        alt={
+                          item.product_name
+                        }
+                        className="h-20 w-20 shrink-0 rounded-xl border border-[#e1e6db] bg-white object-contain p-2"
+                      />
+                    ) : (
+                      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-[#e1e6db] bg-[#f4f5f1] text-xs text-[#92998c]">
+                        Sin imagen
+                      </div>
+                    )}
 
-        <p className="mt-1 text-sm text-[#788170]">
-          Aquí puedes consultar el estado de
-          las solicitudes que ya has enviado.
-        </p>
-
-        {existingRequests.length ===
-        0 ? (
-          <div className="mt-4 rounded-xl border border-dashed border-[#d7ddd0] p-6 text-sm text-[#788170]">
-            Todavía no has enviado ninguna solicitud.
-          </div>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {existingRequests.map(
-              (request) => (
-                <article
-                  key={request.id}
-                  className="rounded-2xl border border-[#dce2d5] bg-white p-4"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#8a9383]">
-                        Solicitud
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-[#2b3625]">
+                        {
+                          item.product_name
+                        }
                       </p>
 
-                      <p className="mt-1 break-all text-sm font-semibold text-[#2b3625]">
-                        {request.id}
+                      {item.product_brand && (
+                        <p className="mt-1 text-xs text-[#8a9383]">
+                          {
+                            item.product_brand
+                          }
+                        </p>
+                      )}
+
+                      <p className="mt-2 text-sm text-[#788170]">
+                        Compraste{" "}
+                        {item.quantity}{" "}
+                        {item.quantity ===
+                        1
+                          ? "unidad"
+                          : "unidades"}
                       </p>
 
-                      <p className="mt-2 text-xs text-[#788170]">
-                        Pedido:{" "}
-                        {request.order_id}
-                      </p>
-
-                      <p className="mt-1 text-xs text-[#788170]">
-                        Enviada:{" "}
-                        {formatDate(
-                          request.created_at
-                        )}
+                      <p className="mt-1 text-sm font-semibold text-[#425530]">
+                        {formatEUR(
+                          Number(
+                            item.unit_price
+                          )
+                        )}{" "}
+                        / unidad
                       </p>
                     </div>
 
-                    <span
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${requestStatusClass(
-                        request.status
-                      )}`}
-                    >
-                      {requestStatusLabel(
-                        request.status
-                      )}
-                    </span>
-                  </div>
-                </article>
-              )
+                    {selected && (
+                      <span className="shrink-0 rounded-full bg-[#425530] px-3 py-1 text-[11px] font-semibold text-white">
+                        Seleccionado
+                      </span>
+                    )}
+                  </button>
+                );
+              }
             )}
           </div>
+        </div>
+      )}
+
+      {/* ===================================================
+          3. CANTIDAD
+      =================================================== */}
+
+      {selectedItem && (
+        <div className="mt-10">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#425530] text-xs font-semibold text-white">
+              3
+            </span>
+
+            <h3 className="text-base font-semibold text-[#34412d]">
+              Indica la cantidad
+            </h3>
+          </div>
+
+          <div className="mt-4 max-w-xs">
+            <select
+              value={
+                selectedQuantity
+              }
+              onChange={(
+                event
+              ) => {
+                setSelectedQuantity(
+                  Number(
+                    event.target
+                      .value
+                  )
+                );
+
+                resetSavedRequest();
+                setFormError(null);
+              }}
+              className="w-full rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none focus:border-[#718360]"
+            >
+              {Array.from(
+                {
+                  length:
+                    selectedItem.quantity,
+                },
+                (_, index) =>
+                  index + 1
+              ).map(
+                (quantity) => (
+                  <option
+                    key={
+                      quantity
+                    }
+                    value={
+                      quantity
+                    }
+                  >
+                    {quantity}
+                  </option>
+                )
+              )}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================
+          4. TIPO
+      =================================================== */}
+
+      {selectedItem && (
+        <div className="mt-10">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#425530] text-xs font-semibold text-white">
+              4
+            </span>
+
+            <h3 className="text-base font-semibold text-[#34412d]">
+              ¿Qué necesitas gestionar?
+            </h3>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {/* DESISTIMIENTO */}
+            <button
+              type="button"
+              disabled={
+                !canWithdraw
+              }
+              onClick={() => {
+                setRequestType(
+                  "withdrawal"
+                );
+
+                setIncidentReason(
+                  ""
+                );
+
+                setIncidentDescription(
+                  ""
+                );
+
+                resetSavedRequest();
+
+                setError(null);
+                setFormError(null);
+              }}
+              className={`rounded-2xl border p-5 text-left transition ${
+                requestType ===
+                "withdrawal"
+                  ? "border-[#718360] bg-[#f3f6ef]"
+                  : canWithdraw
+                  ? "border-[#dce2d5] bg-white hover:border-[#aab7a0] hover:bg-[#fafbf8]"
+                  : "cursor-not-allowed border-[#e5e3dd] bg-[#f7f6f2] opacity-60"
+              }`}
+            >
+              <p className="font-semibold text-[#2b3625]">
+                Quiero desistir de la compra
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-[#788170]">
+                Utiliza esta opción cuando quieras comunicar el
+                desistimiento de una compra dentro del plazo aplicable.
+              </p>
+
+              {canWithdraw ? (
+                <p className="mt-3 text-xs font-semibold text-green-700">
+                  Dentro del plazo general de 14 días desde la
+                  recepción.
+                </p>
+              ) : selectedOrder?.delivered_at ? (
+                <p className="mt-3 text-xs font-semibold text-[#8a655d]">
+                  El plazo general de 14 días aparece finalizado.
+                </p>
+              ) : (
+                <p className="mt-3 text-xs font-semibold text-amber-700">
+                  No consta todavía la fecha de recepción del pedido.
+                </p>
+              )}
+            </button>
+
+            {/* INCIDENCIA */}
+            <button
+              type="button"
+              onClick={() => {
+                setRequestType(
+                  "incident"
+                );
+
+                resetSavedRequest();
+
+                setError(null);
+                setFormError(null);
+              }}
+              className={`rounded-2xl border p-5 text-left transition ${
+                requestType ===
+                "incident"
+                  ? "border-[#718360] bg-[#f3f6ef]"
+                  : "border-[#dce2d5] bg-white hover:border-[#aab7a0] hover:bg-[#fafbf8]"
+              }`}
+            >
+              <p className="font-semibold text-[#2b3625]">
+                Tengo un problema con el producto
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-[#788170]">
+                Utiliza esta opción si el producto ha llegado dañado,
+                incorrecto, incompleto o en mal estado.
+              </p>
+
+              <p className="mt-3 text-xs text-[#788170]">
+                Esta opción no se bloquea por el plazo general de
+                desistimiento.
+              </p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================
+          DATOS INCIDENCIA
+      =================================================== */}
+
+      {requestType ===
+        "incident" &&
+        selectedItem && (
+          <div className="mt-8 rounded-2xl border border-[#dce3d5] bg-[#f8faf6] p-5">
+            <h3 className="font-semibold text-[#34412d]">
+              ¿Qué ha ocurrido?
+            </h3>
+
+            <div className="mt-4">
+              <label className="block text-sm font-semibold text-[#34412d]">
+                Tipo de incidencia
+              </label>
+
+              <select
+                value={
+                  incidentReason
+                }
+                onChange={(
+                  event
+                ) => {
+                  setIncidentReason(
+                    event.target
+                      .value as IncidentReason
+                  );
+
+                  resetSavedRequest();
+
+                  /*
+                   * En cuanto rellena el motivo,
+                   * quitamos el aviso anterior.
+                   */
+                  setFormError(null);
+                }}
+                className="mt-2 w-full rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none focus:border-[#718360]"
+              >
+                <option value="">
+                  Selecciona una opción
+                </option>
+
+                <option value="damaged">
+                  El producto ha llegado dañado
+                </option>
+
+                <option value="bad_condition">
+                  El producto ha llegado en mal estado
+                </option>
+
+                <option value="wrong_product">
+                  He recibido un producto incorrecto
+                </option>
+
+                <option value="missing">
+                  Falta un producto o una unidad
+                </option>
+
+                <option value="other">
+                  Otro problema
+                </option>
+              </select>
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-sm font-semibold text-[#34412d]">
+                Información adicional
+                {incidentReason !==
+                  "other" && (
+                  <span className="ml-1 font-normal text-[#8b9385]">
+                    (opcional)
+                  </span>
+                )}
+              </label>
+
+              <textarea
+                rows={3}
+                value={
+                  incidentDescription
+                }
+                onChange={(
+                  event
+                ) => {
+                  setIncidentDescription(
+                    event.target
+                      .value
+                  );
+
+                  resetSavedRequest();
+
+                  setFormError(null);
+                }}
+                placeholder="Describe únicamente el problema del producto o del envío."
+                className="mt-2 w-full resize-none rounded-xl border border-[#d6ddcf] bg-white px-4 py-3 text-sm text-[#26341f] outline-none placeholder:text-[#a1a99b] focus:border-[#718360]"
+              />
+
+              <p className="mt-2 text-xs leading-5 text-[#788170]">
+                No incluyas información médica ni otros datos personales
+                innecesarios.
+              </p>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-[#e0e4da] bg-white p-4">
+              <p className="text-sm font-semibold text-[#34412d]">
+                Fotografías
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-[#788170]">
+                Si la incidencia lo requiere, podrás adjuntar
+                fotografías del producto o embalaje directamente en
+                WhatsApp o en el correo electrónico.
+              </p>
+            </div>
+          </div>
         )}
-      </div>
+
+      {/* ===================================================
+          5. ENVÍO
+      =================================================== */}
+
+      {requestType && (
+        <div className="mt-10">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#425530] text-xs font-semibold text-white">
+              5
+            </span>
+
+            <h3 className="text-base font-semibold text-[#34412d]">
+              Envía tu solicitud
+            </h3>
+          </div>
+
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-[#788170]">
+            Los datos de tu cuenta, pedido y producto se añadirán
+            automáticamente al mensaje.
+          </p>
+
+          {/* RESUMEN */}
+          <div className="mt-5 rounded-2xl border border-[#dce3d5] bg-[#f8faf6] p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7d8a70]">
+              Resumen
+            </p>
+
+            <div className="mt-4 space-y-2 text-sm text-[#53604b]">
+              <p>
+                <strong>Nombre:</strong>{" "}
+                {profileName ||
+                  user?.email}
+              </p>
+
+              <p>
+                <strong>Pedido:</strong>{" "}
+                {selectedOrder?.id}
+              </p>
+
+              <p>
+                <strong>Producto:</strong>{" "}
+                {
+                  selectedItem?.product_name
+                }
+              </p>
+
+              <p>
+                <strong>Cantidad:</strong>{" "}
+                {selectedQuantity}
+              </p>
+
+              <p>
+                <strong>Solicitud:</strong>{" "}
+                {requestType ===
+                "withdrawal"
+                  ? "Desistimiento"
+                  : "Incidencia"}
+              </p>
+
+              {requestType ===
+                "incident" &&
+                incidentReason && (
+                  <p>
+                    <strong>
+                      Problema:
+                    </strong>{" "}
+                    {getIncidentReasonLabel(
+                      incidentReason
+                    )}
+                  </p>
+                )}
+            </div>
+          </div>
+
+          {/* SOLICITUD REGISTRADA */}
+          {savedRequestId && (
+            <div className="mt-4 rounded-xl border border-[#cadabd] bg-[#f2f7ee] px-4 py-3 text-sm text-[#34502a]">
+              Solicitud registrada correctamente.
+              <br />
+
+              <span className="text-xs">
+                Referencia:{" "}
+                {savedRequestId}
+              </span>
+            </div>
+          )}
+
+          {/* =================================================
+              NUEVO:
+              MENSAJE SOLO CUANDO INTENTA ENVIAR Y FALTA ALGO
+          ================================================= */}
+
+          {formError && (
+            <div
+              role="alert"
+              className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {formError}
+            </div>
+          )}
+
+          {/* BOTONES - MISMO DISEÑO */}
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() =>
+                void openWhatsApp()
+              }
+              disabled={
+                savingRequest
+              }
+              className="rounded-xl bg-[#425530] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#344526] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingRequest
+                ? "Registrando solicitud…"
+                : "Continuar por WhatsApp"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                void openEmail()
+              }
+              disabled={
+                savingRequest
+              }
+              className="rounded-xl border border-[#718360] bg-white px-5 py-3.5 text-sm font-semibold text-[#425530] transition hover:bg-[#f3f6ef] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingRequest
+                ? "Registrando solicitud…"
+                : "Continuar por correo electrónico"}
+            </button>
+          </div>
+
+          <p className="mt-4 text-xs leading-5 text-[#788170]">
+            La solicitud se registrará en Saminatura antes de abrir
+            WhatsApp o tu aplicación de correo. Abrir el canal de
+            contacto no significa que la devolución o incidencia haya
+            sido aprobada automáticamente.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

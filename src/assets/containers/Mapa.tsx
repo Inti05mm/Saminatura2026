@@ -11,7 +11,7 @@ import {
 const Mapa: React.FC = () => {
   const phoneNumber = "+34631415075"
   const visiblePhone = "+34 631 41 50 75"
-  const email = "saminatura369@gmail.com"
+  const email = "saminatura202369@gmail.com"
 
   const address =
     "C. Teruel, 16, local, 22500 Binéfar, Huesca"

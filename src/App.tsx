@@ -3,8 +3,13 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
 } from "react-router-dom";
-import { useContext } from "react";
+
+import {
+  useContext,
+  useEffect,
+} from "react";
 
 import {
   UserContext,
@@ -13,6 +18,9 @@ import {
 
 import { CartProvider } from "./assets/containers/CartContext";
 import { FavoritesProvider } from "./assets/containers/FavoritesContext";
+
+import Header from "./assets/containers/Header";
+import Footer from "./assets/containers/Footer";
 
 import HomePage from "./assets/pages/HomePage";
 import TiendaPage from "./assets/pages/TiendaPage";
@@ -27,6 +35,66 @@ import AdminOrdersPage from "./assets/pages/AdminOrderPage";
 import PerfilPage from "./assets/pages/PerfilPage";
 import ResetPasswordPage from "./assets/pages/ResetPasswordPage";
 import FavoritesPage from "./assets/pages/FavoritesPage";
+
+import EnviosDevolucionesPage from "./assets/pages/EnviosDevolucionesPage";
+import CondicionesCompraPage from "./assets/pages/CondicionesCompraPage";
+import CookiesPage from "./assets/pages/CookiesPage";
+import PrivacidadPage from "./assets/pages/PrivacidadPage";
+import AvisoLegalPage from "./assets/pages/AvisoLegalPage";
+
+
+/*
+  Cada vez que cambia la ruta,
+  lleva automáticamente al usuario
+  al principio de la nueva página.
+*/
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "instant",
+    });
+  }, [pathname]);
+
+  return null;
+}
+
+
+/*
+  Layout exclusivo para páginas legales.
+
+  De esta forma TODAS tienen:
+
+  Header
+  ↓
+  Documento legal
+  ↓
+  Footer
+
+  sin tener que repetir Header/Footer
+  dentro de cada página.
+*/
+function LegalPage({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+
+      <div className="flex-1">
+        {children}
+      </div>
+
+      <Footer />
+    </div>
+  );
+}
+
 
 function AppRoutes() {
   const { initializing } =
@@ -43,104 +111,161 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={<HomePage />}
-      />
+    <>
+      <ScrollToTop />
 
-      <Route
-        path="/tienda"
-        element={<TiendaPage />}
-      />
+      <Routes>
+        <Route
+          path="/"
+          element={<HomePage />}
+        />
 
-      <Route
-        path="/comunidad"
-        element={<ComunidadPage />}
-      />
+        <Route
+          path="/tienda"
+          element={<TiendaPage />}
+        />
 
-      <Route
-        path="/usuario"
-        element={<UserPage />}
-      />
+        <Route
+          path="/comunidad"
+          element={<ComunidadPage />}
+        />
 
-      <Route
-        path="/shopping/:slug"
-        element={<ProdDetPage />}
-      />
+        <Route
+          path="/usuario"
+          element={<UserPage />}
+        />
 
-      <Route
-        path="/shopping"
-        element={<ShopPage />}
-      />
+        <Route
+          path="/shopping/:slug"
+          element={<ProdDetPage />}
+        />
 
-      <Route
-        path="/modificarproductos"
-        element={<EditProductsPage />}
-      />
+        <Route
+          path="/shopping"
+          element={<ShopPage />}
+        />
 
-      <Route
-        path="/micesta"
-        element={<CartPage />}
-      />
+        <Route
+          path="/modificarproductos"
+          element={<EditProductsPage />}
+        />
 
-      <Route
-        path="/favoritos"
-        element={<FavoritesPage />}
-      />
+        <Route
+          path="/micesta"
+          element={<CartPage />}
+        />
 
-      <Route
-        path="/checkout/success"
-        element={<CheckoutSuccessPage />}
-      />
+        <Route
+          path="/favoritos"
+          element={<FavoritesPage />}
+        />
 
-      <Route
-        path="/admin/pedidos"
-        element={<AdminOrdersPage />}
-      />
+        <Route
+          path="/checkout/success"
+          element={<CheckoutSuccessPage />}
+        />
 
-      <Route
-        path="/perfil"
-        element={<PerfilPage />}
-      />
+        <Route
+          path="/admin/pedidos"
+          element={<AdminOrdersPage />}
+        />
 
-      <Route
-        path="/profile"
-        element={
-          <Navigate
-            to="/perfil"
-            replace
-          />
-        }
-      />
+        <Route
+          path="/perfil"
+          element={<PerfilPage />}
+        />
 
-      <Route
-        path="/login"
-        element={
-          <Navigate
-            to="/usuario"
-            replace
-          />
-        }
-      />
+        <Route
+          path="/profile"
+          element={
+            <Navigate
+              to="/perfil"
+              replace
+            />
+          }
+        />
 
-      <Route
-        path="/reset-password"
-        element={<ResetPasswordPage />}
-      />
+        <Route
+          path="/login"
+          element={
+            <Navigate
+              to="/usuario"
+              replace
+            />
+          }
+        />
 
-      <Route
-        path="*"
-        element={
-          <Navigate
-            to="/"
-            replace
-          />
-        }
-      />
-    </Routes>
+        <Route
+          path="/reset-password"
+          element={<ResetPasswordPage />}
+        />
+
+
+        {/* ========================= */}
+        {/* PÁGINAS LEGALES */}
+        {/* ========================= */}
+
+        <Route
+          path="/legal/aviso-legal"
+          element={
+            <LegalPage>
+              <AvisoLegalPage />
+            </LegalPage>
+          }
+        />
+
+        <Route
+          path="/legal/privacidad"
+          element={
+            <LegalPage>
+              <PrivacidadPage />
+            </LegalPage>
+          }
+        />
+
+        <Route
+          path="/legal/cookies"
+          element={
+            <LegalPage>
+              <CookiesPage />
+            </LegalPage>
+          }
+        />
+
+        <Route
+          path="/legal/condiciones-compra"
+          element={
+            <LegalPage>
+              <CondicionesCompraPage />
+            </LegalPage>
+          }
+        />
+
+        <Route
+          path="/legal/envios-devoluciones"
+          element={
+            <LegalPage>
+              <EnviosDevolucionesPage />
+            </LegalPage>
+          }
+        />
+
+
+        {/* Cualquier ruta desconocida */}
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to="/"
+              replace
+            />
+          }
+        />
+      </Routes>
+    </>
   );
 }
+
 
 export default function App() {
   return (
