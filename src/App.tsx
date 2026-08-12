@@ -1,3 +1,5 @@
+import ShopifyTest from "./ShopifyTest";
+
 import {
   BrowserRouter as Router,
   Navigate,
@@ -194,6 +196,11 @@ function AppRoutes() {
             />
           }
         />
+
+        <Route
+  path="/shopify-test"
+  element={<ShopifyTest />}
+/>
 
         <Route
           path="/reset-password"
