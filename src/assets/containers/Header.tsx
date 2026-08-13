@@ -13,11 +13,9 @@ import {
 import { supabase } from "../supabaseClient";
 
 import { useUser } from "../containers/useUser";
-
 import { useCart } from "../containers/CartContext";
-
 import { useShopifyCart } from "../containers/ShopifyCartContext";
-
+import { useShopifyCustomer } from "../containers/ShopifyCustomerContext";
 import { useFavorites } from "../containers/FavoritesContext";
 
 type Toast =
@@ -86,32 +84,32 @@ const Header: React.FC<{
 
   /*
     ============================================================
-    DETECTAR SI ESTAMOS EN LA VERSIÓN SHOPIFY DE PRUEBA
+    RUTAS DE PRUEBA SHOPIFY
     ============================================================
-
-    Ejemplos:
-
-    /shopping-shopify-test
-    /shopping-shopify-test/pan-tostado
-    /micesta-shopify-test
   */
-  const isShopifyTest =
+
+  const isShopifyArea =
     location.pathname.startsWith(
       "/shopping-shopify-test"
     ) ||
     location.pathname.startsWith(
       "/micesta-shopify-test"
+    ) ||
+    location.pathname.startsWith(
+      "/usuario-shopify-test"
+    ) ||
+    location.pathname.startsWith(
+      "/perfil-shopify-test"
+    ) ||
+    location.pathname.startsWith(
+      "/auth/shopify"
     );
 
-  /*
-    Rutas que usa el Header dependiendo
-    de si estamos en Supabase o Shopify.
-  */
-  const shoppingHref = isShopifyTest
+  const shoppingHref = isShopifyArea
     ? "/shopping-shopify-test"
     : "/shopping";
 
-  const cartHref = isShopifyTest
+  const cartHref = isShopifyArea
     ? "/micesta-shopify-test"
     : "/micesta";
 
@@ -119,7 +117,7 @@ const Header: React.FC<{
     location.pathname === "/";
 
   // ============================================================
-  // USUARIO
+  // USUARIO LOCAL / SUPABASE
   // ============================================================
 
   const {
@@ -128,14 +126,24 @@ const Header: React.FC<{
   } = useUser();
 
   const [
-    userMenuOpen,
-    setUserMenuOpen,
-  ] = useState(false);
-
-  const [
     profile,
     setProfile,
   ] = useState<any>(null);
+
+  // ============================================================
+  // USUARIO SHOPIFY
+  // ============================================================
+
+  const {
+    loggedIn: shopifyLoggedIn,
+    loading: shopifyCustomerLoading,
+    logout: shopifyLogout,
+  } = useShopifyCustomer();
+
+  const [
+    userMenuOpen,
+    setUserMenuOpen,
+  ] = useState(false);
 
   // ============================================================
   // CARRITO ANTIGUO SUPABASE
@@ -162,17 +170,13 @@ const Header: React.FC<{
     loading: shopifyCartLoading,
   } = useShopifyCart();
 
-  /*
-    El Header elige automáticamente
-    qué carrito mostrar.
-  */
   const cartItemCount =
-    isShopifyTest
+    isShopifyArea
       ? shopifyCartItemCount
       : legacyCartItemCount;
 
   const cartLoading =
-    isShopifyTest
+    isShopifyArea
       ? shopifyCartLoading
       : legacyCartLoading;
 
@@ -181,10 +185,10 @@ const Header: React.FC<{
   // ============================================================
 
   /*
-    Por ahora siguen siendo los favoritos
-    actuales de Supabase.
+    Todavía son los favoritos antiguos
+    de Supabase.
 
-    Los migraremos después.
+    Después los migraremos.
   */
   const {
     favoriteCount,
@@ -243,14 +247,6 @@ const Header: React.FC<{
       null
     );
 
-  /*
-    Si cambiamos entre la versión
-    Supabase y Shopify, reiniciamos
-    el contador de la animación.
-
-    Así no hace un "rebote" falso por
-    tener distintas cantidades.
-  */
   useEffect(() => {
     cartCountInitializedRef.current =
       false;
@@ -259,7 +255,7 @@ const Header: React.FC<{
       cartItemCount;
 
     setCartBouncing(false);
-  }, [isShopifyTest]);
+  }, [isShopifyArea]);
 
   useEffect(() => {
     if (cartLoading) {
@@ -378,7 +374,7 @@ const Header: React.FC<{
   }, [toast]);
 
   // ============================================================
-  // PERFIL
+  // PERFIL LOCAL SUPABASE
   // ============================================================
 
   useEffect(() => {
@@ -435,22 +431,22 @@ const Header: React.FC<{
   ]);
 
   // ============================================================
-  // LOGOUT
+  // LOGOUT LOCAL / SUPABASE
   // ============================================================
 
-  const handleLogout =
+  const handleLocalLogout =
     async () => {
       try {
         await supabase.auth.signOut();
       } catch (error) {
         console.error(
-          "signOut failed:",
+          "signOut local failed:",
           error
         );
 
         setToast({
           type: "error",
-          msg: "No se pudo cerrar sesión. Inténtalo otra vez.",
+          msg: "No se pudo cerrar la sesión local.",
         });
 
         return;
@@ -463,7 +459,7 @@ const Header: React.FC<{
         null
       > = {
         type: "success",
-        msg: "Se ha cerrado sesión con éxito.",
+        msg: "Se ha cerrado la sesión local.",
       };
 
       setToast(message);
@@ -471,11 +467,28 @@ const Header: React.FC<{
       saveToastForNextPage(
         message
       );
+    };
 
-      if (
-        location.pathname !== "/"
-      ) {
-        navigate("/");
+  // ============================================================
+  // LOGOUT SHOPIFY
+  // ============================================================
+
+  const handleShopifyLogout =
+    async () => {
+      try {
+        setUserMenuOpen(false);
+
+        await shopifyLogout();
+      } catch (error) {
+        console.error(
+          "Shopify logout failed:",
+          error
+        );
+
+        setToast({
+          type: "error",
+          msg: "No se pudo cerrar la sesión de Shopify.",
+        });
       }
     };
 
@@ -563,24 +576,7 @@ const Header: React.FC<{
       product.slug ?? ""
     ).trim();
 
-    /*
-      En la web antigua podemos navegar
-      directamente al producto por id.
-
-      En Shopify, de momento el buscador
-      todavía obtiene sugerencias desde
-      Supabase.
-
-      Como un producto agrupado en Shopify
-      puede tener un HANDLE distinto al slug
-      de una variante antigua, es más seguro
-      mandar al listado de resultados.
-
-      Cuando migremos el buscador totalmente
-      a Shopify, podrá abrir directamente
-      /shopping-shopify-test/:handle.
-    */
-    if (isShopifyTest) {
+    if (isShopifyArea) {
       const params =
         new URLSearchParams();
 
@@ -767,11 +763,11 @@ const Header: React.FC<{
   // ============================================================
 
   /*
-    Esto sigue leyendo Supabase temporalmente.
+    TEMPORAL:
+    sigue leyendo los productos antiguos
+    de Supabase para el buscador.
 
-    No afecta al carrito Shopify.
-    Más adelante sustituiremos este bloque
-    por búsqueda Storefront API.
+    Después lo migraremos a Storefront API.
   */
   useEffect(() => {
     let alive = true;
@@ -783,11 +779,7 @@ const Header: React.FC<{
       query.length < 2
     ) {
       setItems([]);
-
-      setSuggestLoading(
-        false
-      );
-
+      setSuggestLoading(false);
       return;
     }
 
@@ -830,9 +822,7 @@ const Header: React.FC<{
                 );
 
                 if (alive) {
-                  setItems(
-                    []
-                  );
+                  setItems([]);
                 }
 
                 return;
@@ -1160,7 +1150,7 @@ const Header: React.FC<{
   }, []);
 
   // ============================================================
-  // CERRAR MENÚ DE USUARIO
+  // CERRAR MENÚ USUARIO
   // ============================================================
 
   useEffect(() => {
@@ -1310,7 +1300,6 @@ const Header: React.FC<{
         }
       `}</style>
 
-      {/* TOAST */}
       {toast && (
         <div className="fixed right-4 top-4 z-[9999]">
           <div
@@ -1380,9 +1369,7 @@ const Header: React.FC<{
               ].join(" "),
         ].join(" ")}
       >
-        {/* ================================================= */}
         {/* LOGO */}
-        {/* ================================================= */}
 
         <Link
           to="/"
@@ -1399,9 +1386,7 @@ const Header: React.FC<{
           />
         </Link>
 
-        {/* ================================================= */}
-        {/* CENTRO DEL HEADER */}
-        {/* ================================================= */}
+        {/* CENTRO */}
 
         <div
           className={[
@@ -1421,10 +1406,6 @@ const Header: React.FC<{
           ].join(" ")}
         >
           {isHomePage ? (
-            /* ================================================= */
-            /* MENÚ HOME */
-            /* ================================================= */
-
             <nav
               className="
                 flex items-center justify-center
@@ -1441,8 +1422,7 @@ const Header: React.FC<{
               <Link
                 to="/"
                 className="
-                  rounded-full
-                  px-5 py-2
+                  rounded-full px-5 py-2
                   text-[#2f3a1f]
                   transition-all duration-200
                   hover:bg-white
@@ -1457,8 +1437,7 @@ const Header: React.FC<{
               <Link
                 to={shoppingHref}
                 className="
-                  rounded-full
-                  px-5 py-2
+                  rounded-full px-5 py-2
                   text-[#2f3a1f]
                   transition-all duration-200
                   hover:bg-white
@@ -1473,8 +1452,7 @@ const Header: React.FC<{
               <Link
                 to="/tienda"
                 className="
-                  rounded-full
-                  px-5 py-2.5
+                  rounded-full px-5 py-2.5
                   text-[#2f3a1f]
                   transition-all duration-200
                   hover:bg-white
@@ -1487,10 +1465,6 @@ const Header: React.FC<{
               </Link>
             </nav>
           ) : (
-            /* ================================================= */
-            /* BUSCADOR */
-            /* ================================================= */
-
             <form
               ref={
                 searchWrapRef
@@ -1512,7 +1486,6 @@ const Header: React.FC<{
                     transition-all duration-200
                     focus-within:border-[#8fa064]
                     focus-within:bg-[#f7f9f2]
-                    focus-within:shadow-[0_10px_28px_rgba(72,83,47,0.14)]
                     md:p-1.5 md:pl-7
                   "
                 >
@@ -1527,9 +1500,7 @@ const Header: React.FC<{
                       event
                     ) => {
                       setSearchQuery(
-                        event
-                          .target
-                          .value
+                        event.target.value
                       );
 
                       const next =
@@ -1554,12 +1525,11 @@ const Header: React.FC<{
                     className="
                       w-full border-0
                       bg-transparent
-                      px-0 py-0 pr-4
+                      pr-4
                       font-semibold
                       text-[#2f3a1f]
                       outline-none
                       placeholder:text-[#727866]
-                      focus:outline-none
                       focus:ring-0
                     "
                     autoComplete="off"
@@ -1569,8 +1539,7 @@ const Header: React.FC<{
                     type="submit"
                     className="
                       flex min-w-32.5
-                      flex-row items-center
-                      justify-center
+                      items-center justify-center
                       rounded-full
                       border border-[#8fa064]/30
                       bg-white
@@ -1581,20 +1550,13 @@ const Header: React.FC<{
                       shadow-sm
                       transition-all duration-200
                       hover:-translate-y-0.5
-                      hover:border-[#8fa064]/60
-                      hover:bg-[#ffffff]
                       hover:text-[#5f7138]
                       hover:shadow-md
-                      active:translate-y-0
                     "
                   >
                     Buscar
                   </button>
                 </div>
-
-                {/* ============================================= */}
-                {/* SUGERENCIAS */}
-                {/* ============================================= */}
 
                 {suggestOpen &&
                   (suggestLoading ||
@@ -1620,234 +1582,111 @@ const Header: React.FC<{
                       ) : items.length ===
                         0 ? (
                         <div className="px-4 py-3 text-sm text-gray-500">
-                          No hay
-                          resultados.
+                          No hay resultados.
                         </div>
                       ) : (
                         <div className="max-h-72 overflow-auto">
-                          {/* CATEGORÍAS */}
-
                           {categoryItems.length >
                             0 && (
                             <div className="py-2">
-                              <div
-                                className="
-                                  px-4 pb-2
-                                  text-[11px]
-                                  font-bold
-                                  uppercase
-                                  tracking-wider
-                                  text-gray-400
-                                "
-                              >
+                              <div className="px-4 pb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">
                                 Categorías
                               </div>
 
-                              <ul>
-                                {categoryItems.map(
-                                  (
-                                    category
-                                  ) => (
-                                    <li
-                                      key={`cat-${category.value}`}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          goToFilteredShopping(
-                                            "category",
-                                            category.value
-                                          )
-                                        }
-                                        className="
-                                          flex w-full
-                                          items-center
-                                          justify-between
-                                          px-4 py-3
-                                          text-left
-                                          text-sm
-                                          transition
-                                          hover:bg-gray-50
-                                        "
-                                      >
-                                        <span className="font-medium text-gray-800">
-                                          Ver
-                                          productos
-                                          de{" "}
-                                          <span className="font-extrabold">
-                                            {
-                                              category.value
-                                            }
-                                          </span>
-                                        </span>
-
-                                        <span className="text-xs text-gray-400">
-                                          ir
-                                        </span>
-                                      </button>
-                                    </li>
-                                  )
-                                )}
-                              </ul>
+                              {categoryItems.map(
+                                (
+                                  category
+                                ) => (
+                                  <button
+                                    key={
+                                      category.value
+                                    }
+                                    type="button"
+                                    onClick={() =>
+                                      goToFilteredShopping(
+                                        "category",
+                                        category.value
+                                      )
+                                    }
+                                    className="flex w-full px-4 py-3 text-left text-sm hover:bg-gray-50"
+                                  >
+                                    Ver productos de{" "}
+                                    <b>
+                                      {
+                                        category.value
+                                      }
+                                    </b>
+                                  </button>
+                                )
+                              )}
                             </div>
                           )}
-
-                          {/* MARCAS */}
 
                           {brandItems.length >
                             0 && (
                             <div className="border-t border-gray-100 py-2">
-                              <div
-                                className="
-                                  px-4 pb-2
-                                  text-[11px]
-                                  font-bold
-                                  uppercase
-                                  tracking-wider
-                                  text-gray-400
-                                "
-                              >
+                              <div className="px-4 pb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">
                                 Marcas
                               </div>
 
-                              <ul>
-                                {brandItems.map(
-                                  (
-                                    brand
-                                  ) => (
-                                    <li
-                                      key={`brand-${brand.value}`}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          goToFilteredShopping(
-                                            "brand",
-                                            brand.value
-                                          )
-                                        }
-                                        className="
-                                          flex w-full
-                                          items-center
-                                          justify-between
-                                          px-4 py-3
-                                          text-left
-                                          text-sm
-                                          transition
-                                          hover:bg-gray-50
-                                        "
-                                      >
-                                        <span className="font-medium text-gray-800">
-                                          Ver
-                                          productos
-                                          de{" "}
-                                          <span className="font-extrabold">
-                                            {
-                                              brand.value
-                                            }
-                                          </span>
-                                        </span>
-
-                                        <span className="text-xs text-gray-400">
-                                          ir
-                                        </span>
-                                      </button>
-                                    </li>
-                                  )
-                                )}
-                              </ul>
+                              {brandItems.map(
+                                (
+                                  brand
+                                ) => (
+                                  <button
+                                    key={
+                                      brand.value
+                                    }
+                                    type="button"
+                                    onClick={() =>
+                                      goToFilteredShopping(
+                                        "brand",
+                                        brand.value
+                                      )
+                                    }
+                                    className="flex w-full px-4 py-3 text-left text-sm hover:bg-gray-50"
+                                  >
+                                    Ver productos de{" "}
+                                    <b>
+                                      {
+                                        brand.value
+                                      }
+                                    </b>
+                                  </button>
+                                )
+                              )}
                             </div>
                           )}
-
-                          {/* PRODUCTOS */}
 
                           {productItems.length >
                             0 && (
                             <div className="border-t border-gray-100 py-2">
-                              <div
-                                className="
-                                  px-4 pb-2
-                                  text-[11px]
-                                  font-bold
-                                  uppercase
-                                  tracking-wider
-                                  text-gray-400
-                                "
-                              >
+                              <div className="px-4 pb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">
                                 Productos
                               </div>
 
-                              <ul>
-                                {productItems.map(
-                                  (
-                                    product
-                                  ) => {
-                                    const label =
-                                      fullProductName(
-                                        {
-                                          name:
-                                            product.name,
-
-                                          flavor:
-                                            product.flavor,
-
-                                          size:
-                                            product.size,
-                                        }
-                                      );
-
-                                    return (
-                                      <li
-                                        key={`p-${product.id}`}
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            goToProduct(
-                                              {
-                                                id:
-                                                  product.id,
-
-                                                name:
-                                                  product.name,
-
-                                                slug:
-                                                  product.slug,
-
-                                                flavor:
-                                                  product.flavor,
-
-                                                size:
-                                                  product.size,
-                                              }
-                                            )
-                                          }
-                                          className="
-                                            flex w-full
-                                            items-center
-                                            justify-between
-                                            px-4 py-3
-                                            text-left
-                                            text-sm
-                                            transition
-                                            hover:bg-gray-50
-                                          "
-                                        >
-                                          <span className="font-medium text-gray-800">
-                                            {
-                                              label
-                                            }
-                                          </span>
-
-                                          <span className="text-xs text-gray-400">
-                                            ver
-                                          </span>
-                                        </button>
-                                      </li>
-                                    );
-                                  }
-                                )}
-                              </ul>
+                              {productItems.map(
+                                (
+                                  product
+                                ) => (
+                                  <button
+                                    key={
+                                      product.id
+                                    }
+                                    type="button"
+                                    onClick={() =>
+                                      goToProduct(
+                                        product
+                                      )
+                                    }
+                                    className="flex w-full px-4 py-3 text-left text-sm hover:bg-gray-50"
+                                  >
+                                    {fullProductName(
+                                      product
+                                    )}
+                                  </button>
+                                )
+                              )}
                             </div>
                           )}
                         </div>
@@ -1859,9 +1698,7 @@ const Header: React.FC<{
           )}
         </div>
 
-        {/* ================================================= */}
-        {/* DERECHA DEL HEADER */}
-        {/* ================================================= */}
+        {/* DERECHA */}
 
         <div
           className="
@@ -1879,108 +1716,56 @@ const Header: React.FC<{
             md:p-1.5
           "
         >
-          {/* NAVEGACIÓN DESKTOP */}
-
           {!isHomePage && (
-            <nav
-              className="
-                hidden items-center
-                gap-1 text-sm font-medium
-                lg:flex lg:text-base
-              "
-            >
+            <nav className="hidden items-center gap-1 text-sm font-medium lg:flex lg:text-base">
               <Link
                 to="/"
-                className="
-                  rounded-full
-                  px-4 py-2
-                  text-[#2f3a1f]
-                  transition-all duration-200
-                  hover:bg-white
-                  hover:text-[#5f7138]
-                  hover:shadow-sm
-                  xl:px-5
-                "
+                className="rounded-full px-4 py-2 text-[#2f3a1f] hover:bg-white xl:px-5"
               >
                 Inicio
               </Link>
 
               <Link
-                to={
-                  shoppingHref
-                }
-                className="
-                  rounded-full
-                  px-4 py-2
-                  text-[#2f3a1f]
-                  transition-all duration-200
-                  hover:bg-white
-                  hover:text-[#5f7138]
-                  hover:shadow-sm
-                  xl:px-5
-                "
+                to={shoppingHref}
+                className="rounded-full px-4 py-2 text-[#2f3a1f] hover:bg-white xl:px-5"
               >
                 Comprar
               </Link>
 
               <Link
                 to="/tienda"
-                className="
-                  rounded-full
-                  px-4 py-2
-                  text-[#2f3a1f]
-                  transition-all duration-200
-                  hover:bg-white
-                  hover:text-[#5f7138]
-                  hover:shadow-sm
-                  xl:px-5
-                "
+                className="rounded-full px-4 py-2 text-[#2f3a1f] hover:bg-white xl:px-5"
               >
                 Nosotros
               </Link>
             </nav>
           )}
 
-          {/* ================================================= */}
           {/* CARRITO */}
-          {/* ================================================= */}
 
           <Link
             to={cartHref}
             className={`
               relative inline-flex h-[40px] w-[40px]
               items-center justify-center
-              rounded-full bg-transparent
+              rounded-full
               text-black
-              transition-all duration-300 ease-in-out
+              transition-all duration-300
               hover:-translate-y-[2px]
               hover:bg-white
               hover:text-[#5f7138]
-              hover:shadow-sm
-              active:translate-y-0
               ${
                 cartBouncing
                   ? "cart-bump"
                   : ""
               }
             `}
-            aria-label={`Mi cesta${
-              cartItemCount >
-              0
-                ? `, ${cartItemCount} productos`
-                : ""
-            }`}
-            title={
-              isShopifyTest
-                ? "Mi cesta Shopify"
-                : "Mi cesta"
-            }
+            aria-label="Mi cesta"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
               className="h-6 w-6"
-              aria-hidden="true"
             >
               <path
                 d="M20.582,15.637c.215-.055,.406-.181,.543-.356,.147-.191,.906-1.332,1.328-5.056,.33-2.908-.316-5.478-.344-5.586-.096-.375-.399-.661-.779-.734-.139-.026-3.441-.653-7.329-.653-2.881,0-5.99,.345-7.46,.531-.392-1.222-.756-1.879-.775-1.912-.104-.186-.265-.334-.459-.422-.137-.062-1.378-.597-2.973-.408-.548,.066-.939,.563-.874,1.112,.066,.548,.563,.944,1.112,.874,.668-.081,1.26,.041,1.602,.14,.159,.355,.418,1.003,.668,1.922,.002,.006,.426,2.661,.707,5.137,.349,3.08,.668,4.292,.795,4.683,.431,2.799,1.047,3.736,1.167,3.896,.137,.183,.332,.312,.554,.369,.106,.027,2.654,.667,6.58,.667s6.475-.64,6.581-.667c.535-.137,.857-.681,.722-1.215-.137-.535-.683-.864-1.215-.723-.024,.006-2.433,.604-6.088,.604-2.759,0-4.808-.342-5.656-.512-.108-.263-.264-.716-.424-1.422,1.234,.184,3.158,.398,5.437,.398,3.927,0,6.474-.64,6.581-.667ZM14.001,5.252c2.709,0,5.17,.33,6.3,.508,.152,.855,.364,2.489,.166,4.241-.252,2.214-.614,3.331-.802,3.791-.844,.169-2.896,.513-5.664,.513-2.686,0-4.882-.321-5.882-.497-.133-.581-.348-1.729-.584-3.807-.19-1.683-.417-3.27-.564-4.256,1.489-.183,4.396-.493,7.03-.493Z"
@@ -2000,20 +1785,7 @@ const Header: React.FC<{
 
             {cartItemCount >
               0 && (
-              <span
-                className="
-                  pointer-events-none
-                  absolute -right-1 -top-1
-                  flex h-5 min-w-[20px]
-                  items-center justify-center
-                  rounded-full
-                  bg-[#00bf63]
-                  px-1.5
-                  text-[11px] font-bold
-                  leading-none text-white
-                  shadow-md
-                "
-              >
+              <span className="pointer-events-none absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#00bf63] px-1.5 text-[11px] font-bold text-white shadow-md">
                 {cartItemCount >
                 99
                   ? "99+"
@@ -2022,37 +1794,26 @@ const Header: React.FC<{
             )}
           </Link>
 
-          {/* ================================================= */}
           {/* FAVORITOS */}
-          {/* ================================================= */}
 
           <Link
             to="/favoritos"
             className="
               relative inline-flex h-[40px] w-[40px]
               items-center justify-center
-              rounded-full bg-transparent
+              rounded-full
               text-black
-              transition-all duration-300 ease-in-out
+              transition-all duration-300
               hover:-translate-y-[2px]
               hover:bg-white
               hover:text-[#5f7138]
-              hover:shadow-sm
-              active:translate-y-0
             "
-            aria-label={
-              favoriteCount >
-              0
-                ? `Mis favoritos, ${favoriteCount} productos`
-                : "Mis favoritos"
-            }
-            title="Mis favoritos"
+            aria-label="Mis favoritos"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
               className="h-6 w-6"
-              aria-hidden="true"
             >
               <path
                 d="M17.5,1.917a6.4,6.4,0,0,0-5.5,3.3,6.4,6.4,0,0,0-5.5-3.3A6.8,6.8,0,0,0,0,8.967c0,4.547,4.786,9.513,8.8,12.88a4.974,4.974,0,0,0,6.4,0C19.214,18.48,24,13.514,24,8.967A6.8,6.8,0,0,0,17.5,1.917Zm-3.585,18.4a2.973,2.973,0,0,1-3.83,0C4.947,16.006,2,11.87,2,8.967a4.8,4.8,0,0,1,4.5-5.05A4.8,4.8,0,0,1,11,8.967a1,1,0,0,0,2,0,4.8,4.8,0,0,1,4.5-5.05A4.8,4.8,0,0,1,22,8.967C22,11.87,19.053,16.006,13.915,20.313Z"
@@ -2062,20 +1823,7 @@ const Header: React.FC<{
 
             {favoriteCount >
               0 && (
-              <span
-                className="
-                  pointer-events-none
-                  absolute -right-1 -top-1
-                  flex h-5 min-w-[20px]
-                  items-center justify-center
-                  rounded-full
-                  bg-[#00bf63]
-                  px-1.5
-                  text-[11px] font-bold
-                  leading-none text-white
-                  shadow-md
-                "
-              >
+              <span className="pointer-events-none absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#00bf63] px-1.5 text-[11px] font-bold text-white shadow-md">
                 {favoriteCount >
                 99
                   ? "99+"
@@ -2084,9 +1832,7 @@ const Header: React.FC<{
             )}
           </Link>
 
-          {/* ================================================= */}
           {/* USUARIO */}
-          {/* ================================================= */}
 
           <div className="relative inline-flex">
             <button
@@ -2107,27 +1853,30 @@ const Header: React.FC<{
                     !current
                 )
               }
-              className="
-                inline-flex h-[42px] w-[42px]
-                items-center justify-center
-                rounded-full text-black
-                transition-all duration-200
-                hover:scale-105
-                hover:bg-white
-                hover:text-[#5f7138]
-                hover:shadow-sm
-                active:scale-95
-                focus:outline-none
-                focus:ring-2
-                focus:ring-[#00bf63]/60
-                focus:ring-offset-2
-              "
+              className={[
+                "inline-flex h-[42px] w-[42px]",
+                "items-center justify-center",
+                "rounded-full text-black",
+                "transition-all duration-200",
+                "hover:scale-105",
+                "hover:bg-white",
+                "hover:text-[#5f7138]",
+                "hover:shadow-sm",
+                "active:scale-95",
+                "focus:outline-none",
+                "focus:ring-2",
+                "focus:ring-[#00bf63]/60",
+                "focus:ring-offset-2",
+
+                shopifyLoggedIn
+                  ? "ring-2 ring-[#00bf63]/70"
+                  : "",
+              ].join(" ")}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
                 className="h-6 w-6"
-                aria-hidden="true"
               >
                 <path
                   d="m12,0C5.383,0,0,5.383,0,12s5.383,12,12,12,12-5.383,12-12S18.617,0,12,0Zm-4,21.164v-.164c0-2.206,1.794-4,4-4s4,1.794,4,4v.164c-1.226,.537-2.578,.836-4,.836s-2.774-.299-4-.836Zm9.925-1.113c-.456-2.859-2.939-5.051-5.925-5.051s-5.468,2.192-5.925,5.051c-2.47-1.823-4.075-4.753-4.075-8.051C2,6.486,6.486,2,12,2s10,4.486,10,10c0,3.298-1.605,6.228-4.075,8.051Zm-5.925-15.051c-2.206,0-4,1.794-4,4s1.794,4,4,4,4-1.794,4-4-1.794-4-4-4Zm0,6c-1.103,0-2-.897-2-2s.897-2,2-2,2,.897,2,2-.897,2-2,2Z"
@@ -2143,7 +1892,7 @@ const Header: React.FC<{
               role="menu"
               className={`
                 absolute right-0 top-full z-[9999]
-                mt-2 min-w-[220px]
+                mt-2 min-w-[250px]
                 origin-top-right
                 rounded-2xl
                 border border-[#aebc8f]/70
@@ -2158,15 +1907,112 @@ const Header: React.FC<{
                 }
               `}
             >
+              {/* ============================= */}
+              {/* CUENTA SHOPIFY */}
+              {/* ============================= */}
+
               <div className="px-4 pb-2 pt-3">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500">
-                  Usuario
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  Cuenta Shopify
                 </p>
               </div>
 
               <div className="px-1 pb-2">
-                {user ? (
+                {shopifyCustomerLoading ? (
+                  <div className="px-3 py-2 text-sm text-gray-400">
+                    Comprobando sesión…
+                  </div>
+                ) : shopifyLoggedIn ? (
                   <>
+                    <div className="mx-2 mb-2 rounded-xl bg-green-50 px-3 py-2 text-xs font-semibold text-green-700">
+                      Sesión iniciada
+                    </div>
+
+                    <Link
+                      to="/perfil-shopify-test"
+                      role="menuitem"
+                      onClick={() =>
+                        setUserMenuOpen(
+                          false
+                        )
+                      }
+                      className="
+                        flex w-full items-center
+                        rounded-md px-3 py-2
+                        text-sm text-gray-700
+                        transition-colors
+                        hover:bg-[#00bf63]
+                        hover:text-white
+                      "
+                    >
+                      Mi perfil Shopify
+                    </Link>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void handleShopifyLogout();
+                      }}
+                      className="
+                        flex w-full items-center
+                        rounded-md px-3 py-2
+                        text-sm text-gray-700
+                        transition-colors
+                        hover:bg-[#00bf63]
+                        hover:text-white
+                      "
+                    >
+                      Cerrar sesión Shopify
+                    </button>
+                  </>
+                ) : (
+                  <Link
+                    to="/usuario-shopify-test"
+                    role="menuitem"
+                    onClick={() =>
+                      setUserMenuOpen(
+                        false
+                      )
+                    }
+                    className="
+                      flex w-full items-center
+                      rounded-md px-3 py-2
+                      text-sm font-semibold
+                      text-[#425530]
+                      transition-colors
+                      hover:bg-[#00bf63]
+                      hover:text-white
+                    "
+                  >
+                    Iniciar sesión Shopify
+                  </Link>
+                )}
+              </div>
+
+              {/* ============================= */}
+              {/* ACCESO LOCAL TEMPORAL */}
+              {/* ============================= */}
+
+              <div className="border-t border-gray-200" />
+
+              <div className="px-4 pb-2 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                  Acceso local / administración
+                </p>
+              </div>
+
+              <div className="px-1 pb-2">
+                {initializing ? (
+                  <div className="px-3 py-2 text-sm text-gray-400">
+                    Comprobando acceso local…
+                  </div>
+                ) : user ? (
+                  <>
+                    <div className="mx-2 mb-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                      Sesión local activa
+                    </div>
+
                     <Link
                       to="/perfil"
                       role="menuitem"
@@ -2180,97 +2026,74 @@ const Header: React.FC<{
                         rounded-md px-3 py-2
                         text-sm text-gray-700
                         transition-colors
-                        hover:bg-[#00bf63]
-                        hover:text-white
+                        hover:bg-gray-100
                       "
                     >
-                      Mi Perfil
-                    </Link>
-
-                    <Link
-                      to="/favoritos"
-                      role="menuitem"
-                      onClick={() =>
-                        setUserMenuOpen(
-                          false
-                        )
-                      }
-                      className="
-                        flex w-full items-center
-                        rounded-md px-3 py-2
-                        text-sm text-gray-700
-                        transition-colors
-                        hover:bg-[#00bf63]
-                        hover:text-white
-                      "
-                    >
-                      Mis favoritos
+                      Perfil local
                     </Link>
 
                     {profile?.is_admin && (
-                      <Link
-                        to="/admin/pedidos"
-                        role="menuitem"
-                        onClick={() =>
-                          setUserMenuOpen(
-                            false
-                          )
-                        }
-                        className="
-                          flex w-full items-center
-                          rounded-md px-3 py-2
-                          text-sm font-semibold
-                          text-red-600
-                          transition-colors
-                          hover:bg-[#00bf63]
-                          hover:text-white
-                        "
-                      >
-                        Pedidos
-                      </Link>
-                    )}
+                      <>
+                        <Link
+                          to="/admin/pedidos"
+                          role="menuitem"
+                          onClick={() =>
+                            setUserMenuOpen(
+                              false
+                            )
+                          }
+                          className="
+                            flex w-full items-center
+                            rounded-md px-3 py-2
+                            text-sm font-semibold
+                            text-red-600
+                            transition-colors
+                            hover:bg-[#00bf63]
+                            hover:text-white
+                          "
+                        >
+                          Pedidos
+                        </Link>
 
-                    {profile?.is_admin && (
-                      <Link
-                        to="/modificarproductos"
-                        role="menuitem"
-                        onClick={() =>
-                          setUserMenuOpen(
-                            false
-                          )
-                        }
-                        className="
-                          flex w-full items-center
-                          rounded-md px-3 py-2
-                          text-sm font-semibold
-                          text-red-600
-                          transition-colors
-                          hover:bg-[#00bf63]
-                          hover:text-white
-                        "
-                      >
-                        Modificar Productos
-                      </Link>
+                        <Link
+                          to="/modificarproductos"
+                          role="menuitem"
+                          onClick={() =>
+                            setUserMenuOpen(
+                              false
+                            )
+                          }
+                          className="
+                            flex w-full items-center
+                            rounded-md px-3 py-2
+                            text-sm font-semibold
+                            text-red-600
+                            transition-colors
+                            hover:bg-[#00bf63]
+                            hover:text-white
+                          "
+                        >
+                          Modificar productos
+                        </Link>
+                      </>
                     )}
-
-                    <div className="my-2 border-t border-gray-300" />
 
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={
-                        handleLogout
-                      }
+                      onClick={() => {
+                        void handleLocalLogout();
+                      }}
                       className="
                         flex w-full items-center
                         rounded-md px-3 py-2
-                        text-sm text-gray-700
+                        text-sm text-gray-500
                         transition-colors
-                        hover:bg-[#00bf63]
-                        hover:text-white
+                        hover:bg-gray-100
+                        hover:text-gray-900
                       "
                     >
-                      Cerrar sesión
+                      Cerrar sesión local
                     </button>
                   </>
                 ) : (
@@ -2285,23 +2108,19 @@ const Header: React.FC<{
                     className="
                       flex w-full items-center
                       rounded-md px-3 py-2
-                      text-sm text-gray-700
+                      text-sm text-gray-500
                       transition-colors
-                      hover:bg-[#00bf63]
-                      hover:text-white
+                      hover:bg-gray-100
+                      hover:text-gray-900
                     "
                   >
-                    Iniciar sesión
+                    Entrar con acceso local
                   </Link>
                 )}
               </div>
             </div>
           </div>
         </div>
-
-        {/* ================================================= */}
-        {/* NAVEGACIÓN MÓVIL */}
-        {/* ================================================= */}
 
         {!isHomePage && (
           <nav
@@ -2315,32 +2134,21 @@ const Header: React.FC<{
           >
             <Link
               to="/"
-              className="
-                transition-colors
-                hover:text-green-600
-              "
+              className="transition-colors hover:text-green-600"
             >
               Inicio
             </Link>
 
             <Link
-              to={
-                shoppingHref
-              }
-              className="
-                transition-colors
-                hover:text-green-600
-              "
+              to={shoppingHref}
+              className="transition-colors hover:text-green-600"
             >
               Comprar
             </Link>
 
             <Link
               to="/tienda"
-              className="
-                transition-colors
-                hover:text-green-600
-              "
+              className="transition-colors hover:text-green-600"
             >
               Nosotros
             </Link>

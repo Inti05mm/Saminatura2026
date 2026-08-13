@@ -47,6 +47,10 @@ import ShopifyShopPage from "./assets/pages/ShopifyShopPage";
 import { ShopifyCartProvider } from "./assets/containers/ShopifyCartContext";
 import ShopifyCartPage from "./assets/pages/ShopifyCartPage";
 import ShopifyProductDetailPage from "./assets/pages/ShopifyProductDetailPage";
+import ShopifyUserPage from "./assets/pages/ShopifyUserPage";
+import ShopifyCustomerCallbackPage from "./assets/pages/ShopifyCustomerCallbackPage";
+import { ShopifyCustomerProvider } from "./assets/containers/ShopifyCustomerContext";
+import ShopifyProfilePage from "./assets/pages/ShopifyProfilePage";
 /*
   Cada vez que cambia la ruta,
   lleva automáticamente al usuario
@@ -155,6 +159,11 @@ function AppRoutes() {
         />
 
         <Route
+  path="/perfil-shopify-test"
+  element={<ShopifyProfilePage />}
+/>
+
+        <Route
           path="/modificarproductos"
           element={<EditProductsPage />}
         />
@@ -162,6 +171,16 @@ function AppRoutes() {
         <Route
   path="/shopping-shopify-test/:handle"
   element={<ShopifyProductDetailPage />}
+/>
+
+<Route
+  path="/usuario-shopify-test"
+  element={<ShopifyUserPage />}
+/>
+
+<Route
+  path="/auth/shopify/callback"
+  element={<ShopifyCustomerCallbackPage />}
 />
 
         <Route
@@ -295,14 +314,16 @@ export default function App() {
   return (
     <Router>
       <UserProvider>
-<CartProvider>
-  <ShopifyCartProvider>
-    <FavoritesProvider>
-      <AppRoutes />
-    </FavoritesProvider>
-  </ShopifyCartProvider>
-</CartProvider>
-      </UserProvider>
+  <CartProvider>
+    <ShopifyCartProvider>
+      <ShopifyCustomerProvider>
+        <FavoritesProvider>
+          <AppRoutes />
+        </FavoritesProvider>
+      </ShopifyCustomerProvider>
+    </ShopifyCartProvider>
+  </CartProvider>
+</UserProvider>
     </Router>
   );
 }
