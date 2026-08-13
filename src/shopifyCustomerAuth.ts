@@ -364,33 +364,7 @@ export async function loginWithShopifyCustomer() {
     "ES"
   );
 
-  /*
-    DEBUG SEGURO:
-    NO mostramos verifier ni challenge.
-  */
-  console.log(
-    "=== SHOPIFY AUTH DEBUG ==="
-  );
 
-  console.log(
-    "CLIENT_ID AUTH:",
-    CLIENT_ID
-  );
-
-  console.log(
-    "REDIRECT_URI AUTH:",
-    REDIRECT_URI
-  );
-
-  console.log(
-    "VERIFIER LENGTH AUTH:",
-    verifier.length
-  );
-
-  console.log(
-    "CHALLENGE LENGTH:",
-    challenge.length
-  );
 
   window.location.assign(
     url.toString()

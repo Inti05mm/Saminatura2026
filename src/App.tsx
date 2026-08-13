@@ -51,6 +51,8 @@ import ShopifyUserPage from "./assets/pages/ShopifyUserPage";
 import ShopifyCustomerCallbackPage from "./assets/pages/ShopifyCustomerCallbackPage";
 import { ShopifyCustomerProvider } from "./assets/containers/ShopifyCustomerContext";
 import ShopifyProfilePage from "./assets/pages/ShopifyProfilePage";
+import ShopifyAdminOrdersManager from "./assets/containers/AdminOrdersManager";
+
 /*
   Cada vez que cambia la ruta,
   lleva automáticamente al usuario
@@ -152,6 +154,10 @@ function AppRoutes() {
           path="/shopping/:slug"
           element={<ProdDetPage />}
         />
+        <Route
+  path="/admin/pedidos-shopify"
+  element={<ShopifyAdminOrdersManager />}
+/>
 
         <Route
           path="/shopping"

@@ -105,15 +105,11 @@ function formatMoney(
     return new Intl.NumberFormat(
       "es-ES",
       {
-        style:
-          "currency",
-
+        style: "currency",
         currency:
           money.currencyCode,
       }
-    ).format(
-      amount
-    );
+    ).format(amount);
   } catch {
     return `${amount.toFixed(
       2
@@ -186,10 +182,7 @@ function financialStatusLabel(
     default:
       return status
         ? status
-            .replace(
-              /_/g,
-              " "
-            )
+            .replace(/_/g, " ")
             .toLowerCase()
         : "Sin estado";
   }
@@ -235,10 +228,7 @@ function fulfillmentStatusLabel(
     default:
       return status
         ? status
-            .replace(
-              /_/g,
-              " "
-            )
+            .replace(/_/g, " ")
             .toLowerCase()
         : "Sin estado";
   }
@@ -266,6 +256,18 @@ export default function ShopifyProfilePage() {
     useState<ShopifyCustomer | null>(
       null
     );
+
+  /*
+    Popup de bienvenida.
+
+    Se mostrará solamente la primera vez
+    que ESTE navegador vea esta cuenta Shopify.
+  */
+  const [
+    welcomeOpen,
+    setWelcomeOpen,
+  ] =
+    useState(false);
 
   const [
     loading,
@@ -408,6 +410,42 @@ export default function ShopifyProfilePage() {
         setCustomer(
           result
         );
+
+        /*
+          ====================================================
+          BIENVENIDA UNA SOLA VEZ POR CUENTA / NAVEGADOR
+          ====================================================
+        */
+
+        try {
+          const welcomeKey =
+            `saminatura_shopify_welcome_${result.id}`;
+
+          const alreadyWelcomed =
+            localStorage.getItem(
+              welcomeKey
+            ) === "1";
+
+          if (!alreadyWelcomed) {
+            /*
+              Marcamos primero y después abrimos.
+              Así cerrar sesión NO vuelve a activar el popup.
+            */
+            localStorage.setItem(
+              welcomeKey,
+              "1"
+            );
+
+            setWelcomeOpen(
+              true
+            );
+          }
+        } catch {
+          /*
+            Si localStorage estuviera bloqueado,
+            simplemente no rompemos el perfil.
+          */
+        }
 
         setFirstName(
           result.firstName ??
@@ -837,7 +875,10 @@ export default function ShopifyProfilePage() {
         {/* PERFIL */}
         {/* ================================================= */}
 
-        <div className="rounded-[28px] border border-[#d5ddca] bg-white p-7 shadow-sm md:p-10">
+        <div
+          id="shopify-profile-data"
+          className="rounded-[28px] border border-[#d5ddca] bg-white p-7 shadow-sm md:p-10"
+        >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#788767]">
@@ -1005,14 +1046,11 @@ export default function ShopifyProfilePage() {
               0 ? (
                 <div className="mt-7 rounded-2xl border border-dashed border-gray-300 bg-[#fafbf7] p-8 text-center">
                   <p className="font-semibold text-gray-800">
-                    Todavía no tienes
-                    direcciones guardadas
+                    Todavía no tienes direcciones guardadas
                   </p>
 
                   <p className="mt-2 text-sm text-gray-500">
-                    Añade una para
-                    utilizarla en tus
-                    próximos pedidos.
+                    Añade una para utilizarla en tus próximos pedidos.
                   </p>
                 </div>
               ) : (
@@ -1141,6 +1179,111 @@ export default function ShopifyProfilePage() {
       </section>
 
       <Footer />
+
+      {/* ================================================= */}
+      {/* POPUP BIENVENIDA */}
+      {/* ================================================= */}
+
+      {welcomeOpen && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 px-4 backdrop-blur-[2px]"
+          onClick={() =>
+            setWelcomeOpen(
+              false
+            )
+          }
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shopify-welcome-title"
+            className="w-full max-w-md rounded-[28px] border border-[#d5ddca] bg-white p-7 shadow-2xl md:p-8"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#edf4e8] text-2xl font-bold text-[#425530]">
+              ✓
+            </div>
+
+            <p className="mt-5 text-center text-xs font-semibold uppercase tracking-[0.24em] text-[#788767]">
+              Bienvenida a Saminatura
+            </p>
+
+            <h2
+              id="shopify-welcome-title"
+              className="mt-2 text-center text-2xl font-semibold text-[#26341f]"
+            >
+              Tu cuenta está lista
+            </h2>
+
+            <p className="mt-3 text-center text-sm leading-6 text-gray-600">
+              Puedes completar tus datos y guardar una dirección,
+              o empezar a comprar ahora.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setWelcomeOpen(
+                  false
+                );
+
+                setEditingProfile(
+                  true
+                );
+
+                window.setTimeout(
+                  () => {
+                    document
+                      .getElementById(
+                        "shopify-profile-data"
+                      )
+                      ?.scrollIntoView({
+                        behavior:
+                          "smooth",
+                        block:
+                          "start",
+                      });
+                  },
+                  50
+                );
+              }}
+              className="mt-7 w-full rounded-full bg-[#425530] px-5 py-3 font-semibold text-white transition hover:bg-[#344526]"
+            >
+              Terminar de configurar mi cuenta
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setWelcomeOpen(
+                  false
+                );
+
+                navigate(
+                  "/shopping-shopify-test"
+                );
+              }}
+              className="mt-3 w-full rounded-full border border-[#b9c6aa] bg-white px-5 py-3 font-semibold text-[#425530] transition hover:bg-[#f5f7f0]"
+            >
+              Empezar a comprar
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                setWelcomeOpen(
+                  false
+                )
+              }
+              className="mt-4 w-full text-sm font-medium text-gray-400 transition hover:text-gray-600"
+            >
+              Ahora no
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ================================================= */}
       {/* MODAL DIRECCIÓN */}
@@ -1421,8 +1564,7 @@ export default function ShopifyProfilePage() {
               />
 
               <span className="text-sm font-semibold text-[#425530]">
-                Usar como dirección
-                predeterminada
+                Usar como dirección predeterminada
               </span>
             </label>
 
@@ -1694,10 +1836,19 @@ function OrderCard({
       order.fulfillmentStatus
     );
 
+  const productCount =
+    order.lineItems.nodes.reduce(
+      (
+        total,
+        item
+      ) =>
+        total +
+        item.quantity,
+      0
+    );
+
   return (
     <article className="overflow-hidden rounded-2xl border border-gray-200 bg-[#fafbf7]">
-      {/* CABECERA */}
-
       <div className="p-5 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
@@ -1733,8 +1884,6 @@ function OrderCard({
           </div>
         </div>
 
-        {/* ESTADOS */}
-
         <div className="mt-5 flex flex-wrap gap-2">
           <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
             {paymentLabel}
@@ -1745,31 +1894,13 @@ function OrderCard({
           </span>
 
           <span className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-500">
-            {order.lineItems.nodes.reduce(
-              (
-                total,
-                item
-              ) =>
-                total +
-                item.quantity,
-              0
-            )}{" "}
+            {productCount}{" "}
             producto
-            {order.lineItems.nodes.reduce(
-              (
-                total,
-                item
-              ) =>
-                total +
-                item.quantity,
-              0
-            ) === 1
+            {productCount === 1
               ? ""
               : "s"}
           </span>
         </div>
-
-        {/* BOTONES */}
 
         <div className="mt-5 flex flex-wrap gap-3">
           <button
@@ -1799,12 +1930,8 @@ function OrderCard({
         </div>
       </div>
 
-      {/* DETALLE */}
-
       {expanded && (
         <div className="border-t border-gray-200 bg-white p-5 md:p-6">
-          {/* PRODUCTOS */}
-
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
               Productos
@@ -1896,8 +2023,6 @@ function OrderCard({
             </div>
           </div>
 
-          {/* RESUMEN ECONÓMICO */}
-
           <div className="mt-7 rounded-2xl border border-gray-200 bg-[#fafbf7] p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
               Resumen
@@ -1954,8 +2079,6 @@ function OrderCard({
               </div>
             </div>
           </div>
-
-          {/* DIRECCIÓN DE ENVÍO */}
 
           {order.shippingAddress && (
             <div className="mt-7 rounded-2xl border border-gray-200 bg-[#fafbf7] p-5">
@@ -2065,8 +2188,6 @@ function OrderCard({
               </div>
             </div>
           )}
-
-          {/* REFERENCIA */}
 
           {order.confirmationNumber && (
             <p className="mt-5 text-xs text-gray-400">

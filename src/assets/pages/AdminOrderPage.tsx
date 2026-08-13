@@ -3,7 +3,8 @@ import Header from "../containers/Header";
 import AdminOrdersManager from "../containers/AdminOrdersManager";
 import AdminAnalytics from "../containers/AdminAnalytics";
 import AdminTopNav from "../containers/AdminSidebar";
-import AdminReturnsManager from "../containers/AdminReturnsManager";
+
+import ShopifyAdminOrdersManager from "../containers/ShopifyAdminOrdersManager";
 
 const SECTIONS = [
   { id: "pedidos", label: "Pedidos" },
@@ -67,7 +68,8 @@ export default function AdminOrdersPage() {
   id="devoluciones"
   className="scroll-mt-32"
 >
-  <AdminReturnsManager />
+
+  <ShopifyAdminOrdersManager />
 </section>
 
         <section id="graficos" className="scroll-mt-32">

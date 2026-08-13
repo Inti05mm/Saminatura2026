@@ -11,9 +11,18 @@ import {
   handleShopifyCustomerCallback,
 } from "../../shopifyCustomerAuth";
 
+import {
+  useShopifyCustomer,
+} from "../containers/ShopifyCustomerContext";
+
 export default function ShopifyCustomerCallbackPage() {
   const navigate =
     useNavigate();
+
+  const {
+    reloadCustomerSession,
+  } =
+    useShopifyCustomer();
 
   const [
     error,
@@ -28,18 +37,32 @@ export default function ShopifyCustomerCallbackPage() {
 
     async function completeLogin() {
       try {
+        /*
+          1. Shopify devuelve el code.
+          2. Lo intercambiamos por access_token.
+          3. shopifyCustomerAuth lo guarda en localStorage.
+        */
         await handleShopifyCustomerCallback();
 
         if (!mounted) {
           return;
         }
 
-        navigate(
-          "/perfil-shopify-test",
-          {
-            replace: true,
-          }
-        );
+        /*
+          MUY IMPORTANTE:
+          actualizamos inmediatamente el contexto React.
+
+          Sin esto, loggedIn seguiría en false hasta
+          recargar la página.
+        */
+reloadCustomerSession();
+
+navigate(
+  "/perfil-shopify-test",
+  {
+    replace: true,
+  }
+);
       } catch (err) {
         console.error(
           "Error callback Shopify:",
@@ -63,7 +86,10 @@ export default function ShopifyCustomerCallbackPage() {
     return () => {
       mounted = false;
     };
-  }, [navigate]);
+  }, [
+    navigate,
+    reloadCustomerSession,
+  ]);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5f1e8] px-4">

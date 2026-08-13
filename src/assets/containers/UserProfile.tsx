@@ -129,7 +129,7 @@ export default function UserProfile() {
     setUser,
     initializing,
   } = useUser();
-
+  
   const [
     activeSection,
     setActiveSection,
