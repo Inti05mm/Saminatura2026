@@ -5,14 +5,36 @@ const CLIENT_ID =
   import.meta.env.VITE_SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID?.trim();
 
 const REDIRECT_URI =
-  import.meta.env.VITE_SHOPIFY_CUSTOMER_REDIRECT_URI?.trim();
+  `${window.location.origin}/auth/shopify/callback`;
 
-const VERIFIER_KEY = "shopify_customer_pkce_verifier";
-const STATE_KEY = "shopify_customer_oauth_state";
-const NONCE_KEY = "shopify_customer_oauth_nonce";
+/* ============================================================
+   STORAGE KEYS
+   ============================================================ */
 
-const ACCESS_TOKEN_KEY = "shopify_customer_access_token";
-const ID_TOKEN_KEY = "shopify_customer_id_token";
+const VERIFIER_KEY =
+  "shopify_customer_pkce_verifier";
+
+const STATE_KEY =
+  "shopify_customer_oauth_state";
+
+const NONCE_KEY =
+  "shopify_customer_oauth_nonce";
+
+const ACCESS_TOKEN_KEY =
+  "shopify_customer_access_token";
+
+const ID_TOKEN_KEY =
+  "shopify_customer_id_token";
+
+const REFRESH_TOKEN_KEY =
+  "shopify_customer_refresh_token";
+
+const TOKEN_EXPIRES_AT_KEY =
+  "shopify_customer_token_expires_at";
+
+/* ============================================================
+   TYPES
+   ============================================================ */
 
 type OpenIdConfig = {
   authorization_endpoint: string;
@@ -21,14 +43,30 @@ type OpenIdConfig = {
   issuer?: string;
 };
 
-type TokenResponse = {
+export type ShopifyCustomerTokenResponse = {
   access_token: string;
   token_type: string;
+
   expires_in?: number;
   scope?: string;
+
   id_token?: string;
   refresh_token?: string;
 };
+
+/* ============================================================
+   CALLBACK LOCK
+
+   Evita canjear dos veces el mismo authorization code.
+   ============================================================ */
+
+let callbackPromise:
+  | Promise<ShopifyCustomerTokenResponse>
+  | null = null;
+
+/* ============================================================
+   CONFIG
+   ============================================================ */
 
 function ensureConfig() {
   if (!SHOP_DOMAIN) {
@@ -43,21 +81,28 @@ function ensureConfig() {
     );
   }
 
-  if (!REDIRECT_URI) {
-    throw new Error(
-      "Falta VITE_SHOPIFY_CUSTOMER_REDIRECT_URI."
-    );
-  }
+
 }
 
-function base64UrlEncode(
+/* ============================================================
+   BASE64 URL
+   ============================================================ */
+
+function bytesToBase64Url(
   bytes: Uint8Array
 ) {
   let binary = "";
 
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
+  for (
+    let i = 0;
+    i < bytes.length;
+    i++
+  ) {
+    binary +=
+      String.fromCharCode(
+        bytes[i]
+      );
+  }
 
   return btoa(binary)
     .replace(/\+/g, "-")
@@ -65,65 +110,81 @@ function base64UrlEncode(
     .replace(/=+$/g, "");
 }
 
-function randomString(
-  length = 64
-) {
-  const charset =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+/* ============================================================
+   RANDOM BYTES
+   ============================================================ */
 
-  const random =
-    crypto.getRandomValues(
-      new Uint8Array(length)
+function randomBytes(
+  length: number
+) {
+  const bytes =
+    new Uint8Array(
+      length
     );
 
-  let result = "";
+  crypto.getRandomValues(
+    bytes
+  );
 
-  for (
-    let i = 0;
-    i < random.length;
-    i++
-  ) {
-    result +=
-      charset[
-        random[i] %
-          charset.length
-      ];
-  }
-
-  return result;
+  return bytes;
 }
 
-async function sha256(
-  value: string
-) {
-  const data =
-    new TextEncoder().encode(
-      value
-    );
+/* ============================================================
+   PKCE
 
-  return crypto.subtle.digest(
-    "SHA-256",
-    data
+   Shopify:
+   verifier = random 32 bytes -> base64url
+   challenge = SHA256(verifier) -> base64url
+   ============================================================ */
+
+function generateCodeVerifier() {
+  return bytesToBase64Url(
+    randomBytes(32)
   );
 }
 
 async function createCodeChallenge(
   verifier: string
 ) {
-  const digest =
-    await sha256(verifier);
+  const encoded =
+    new TextEncoder().encode(
+      verifier
+    );
 
-  return base64UrlEncode(
-    new Uint8Array(digest)
+  const digest =
+    await crypto.subtle.digest(
+      "SHA-256",
+      encoded
+    );
+
+  return bytesToBase64Url(
+    new Uint8Array(
+      digest
+    )
   );
 }
+
+/* ============================================================
+   STATE / NONCE
+   ============================================================ */
+
+function generateSecureValue() {
+  return bytesToBase64Url(
+    randomBytes(32)
+  );
+}
+
+/* ============================================================
+   DISCOVERY
+   ============================================================ */
 
 export async function getCustomerAuthConfig(): Promise<OpenIdConfig> {
   ensureConfig();
 
-  const response = await fetch(
-    `https://${SHOP_DOMAIN}/.well-known/openid-configuration`
-  );
+  const response =
+    await fetch(
+      `https://${SHOP_DOMAIN}/.well-known/openid-configuration`
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -134,14 +195,90 @@ export async function getCustomerAuthConfig(): Promise<OpenIdConfig> {
   return response.json();
 }
 
+/* ============================================================
+   LIMPIAR PKCE TEMPORAL
+   ============================================================ */
+
+function clearPkceStorage() {
+  sessionStorage.removeItem(
+    VERIFIER_KEY
+  );
+
+  sessionStorage.removeItem(
+    STATE_KEY
+  );
+
+  sessionStorage.removeItem(
+    NONCE_KEY
+  );
+}
+
+/* ============================================================
+   LIMPIAR CODE DE LA URL
+
+   IMPORTANTÍSIMO:
+   una vez usado el code no queremos que React pueda volver
+   a procesarlo al remontar el componente.
+   ============================================================ */
+
+function cleanCallbackUrl() {
+  const url =
+    new URL(
+      window.location.href
+    );
+
+  url.searchParams.delete(
+    "code"
+  );
+
+  url.searchParams.delete(
+    "state"
+  );
+
+  url.searchParams.delete(
+    "error"
+  );
+
+  url.searchParams.delete(
+    "error_description"
+  );
+
+  window.history.replaceState(
+    {},
+    document.title,
+    url.pathname +
+      url.search +
+      url.hash
+  );
+}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+
 export async function loginWithShopifyCustomer() {
   ensureConfig();
+
+  /*
+    Si YA estamos autenticados,
+    no abrimos otro OAuth.
+  */
+  const existingToken =
+    getShopifyCustomerAccessToken();
+
+  if (existingToken) {
+    console.log(
+      "[Shopify Auth] Ya existe una sesión activa."
+    );
+
+    return;
+  }
 
   const config =
     await getCustomerAuthConfig();
 
   const verifier =
-    randomString(96);
+    generateCodeVerifier();
 
   const challenge =
     await createCodeChallenge(
@@ -149,11 +286,14 @@ export async function loginWithShopifyCustomer() {
     );
 
   const state =
-    randomString(48);
+    generateSecureValue();
 
   const nonce =
-    randomString(48);
+    generateSecureValue();
 
+  /*
+    Guardar ANTES de salir de nuestra web.
+  */
   sessionStorage.setItem(
     VERIFIER_KEY,
     verifier
@@ -224,35 +364,106 @@ export async function loginWithShopifyCustomer() {
     "ES"
   );
 
-  window.location.href =
-    url.toString();
+  /*
+    DEBUG SEGURO:
+    NO mostramos verifier ni challenge.
+  */
+  console.log(
+    "=== SHOPIFY AUTH DEBUG ==="
+  );
+
+  console.log(
+    "CLIENT_ID AUTH:",
+    CLIENT_ID
+  );
+
+  console.log(
+    "REDIRECT_URI AUTH:",
+    REDIRECT_URI
+  );
+
+  console.log(
+    "VERIFIER LENGTH AUTH:",
+    verifier.length
+  );
+
+  console.log(
+    "CHALLENGE LENGTH:",
+    challenge.length
+  );
+
+  window.location.assign(
+    url.toString()
+  );
 }
 
-export async function handleShopifyCustomerCallback() {
+/* ============================================================
+   CALLBACK REAL
+   ============================================================ */
+
+async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenResponse> {
   ensureConfig();
+
+  /*
+    ==========================================================
+    PROTECCIÓN Nº1
+
+    Si otro montaje del componente YA consiguió el token,
+    NO volvemos a utilizar el authorization code.
+    ==========================================================
+  */
+
+  const existingToken =
+    getShopifyCustomerAccessToken();
+
+  if (existingToken) {
+    console.log(
+      "[Shopify Callback] El token ya existe. No se vuelve a canjear el code."
+    );
+
+    cleanCallbackUrl();
+    clearPkceStorage();
+
+    return {
+      access_token:
+        existingToken,
+
+      token_type:
+        "Bearer",
+    };
+  }
 
   const params =
     new URLSearchParams(
       window.location.search
     );
 
-  const code =
-    params.get("code");
-
-  const returnedState =
-    params.get("state");
-
   const oauthError =
-    params.get("error");
+    params.get(
+      "error"
+    );
 
   if (oauthError) {
-    throw new Error(
+    const description =
       params.get(
         "error_description"
-      ) ??
+      );
+
+    throw new Error(
+      description ??
         oauthError
     );
   }
+
+  const code =
+    params.get(
+      "code"
+    );
+
+  const returnedState =
+    params.get(
+      "state"
+    );
 
   if (!code) {
     throw new Error(
@@ -265,9 +476,15 @@ export async function handleShopifyCustomerCallback() {
       STATE_KEY
     );
 
+  if (!storedState) {
+    throw new Error(
+      "No se encontró el estado OAuth guardado."
+    );
+  }
+
   if (
-    !storedState ||
-    storedState !== returnedState
+    storedState !==
+    returnedState
   ) {
     throw new Error(
       "El estado OAuth no coincide."
@@ -288,101 +505,357 @@ export async function handleShopifyCustomerCallback() {
   const config =
     await getCustomerAuthConfig();
 
+  /*
+    Shopify requiere los mismos:
+    - client_id
+    - redirect_uri
+    - authorization code
+    - code_verifier
+  */
   const body =
-    new URLSearchParams();
+    new URLSearchParams({
+      grant_type:
+        "authorization_code",
 
-  body.set(
-    "grant_type",
-    "authorization_code"
+      client_id:
+        CLIENT_ID!,
+
+      redirect_uri:
+        REDIRECT_URI!,
+
+      code,
+
+      code_verifier:
+        verifier,
+    });
+
+  /*
+    ==========================================================
+    DEBUG
+
+    NO imprimimos:
+    - code
+    - verifier
+    - token
+    ==========================================================
+  */
+
+  console.log(
+    "=== SHOPIFY TOKEN DEBUG ==="
   );
 
-  body.set(
-    "client_id",
-    CLIENT_ID!
+  console.log(
+    "CLIENT_ID:",
+    CLIENT_ID
   );
 
-  body.set(
-    "redirect_uri",
-    REDIRECT_URI!
+  console.log(
+    "REDIRECT_URI:",
+    REDIRECT_URI
   );
 
-  body.set(
-    "code",
-    code
+  console.log(
+    "TOKEN_ENDPOINT:",
+    config.token_endpoint
   );
 
-  body.set(
-    "code_verifier",
-    verifier
+  console.log(
+    "STATE_MATCH:",
+    storedState ===
+      returnedState
   );
 
-  const response = await fetch(
-    config.token_endpoint,
-    {
-      method: "POST",
-
-      headers: {
-        "Content-Type":
-          "application/x-www-form-urlencoded",
-      },
-
-      body:
-        body.toString(),
-    }
+  console.log(
+    "CODE_PRESENT:",
+    !!code
   );
+
+  console.log(
+    "CODE_LENGTH:",
+    code.length
+  );
+
+  console.log(
+    "VERIFIER_PRESENT:",
+    !!verifier
+  );
+
+  console.log(
+    "VERIFIER_LENGTH:",
+    verifier.length
+  );
+
+  /*
+    ==========================================================
+    TOKEN EXCHANGE
+    ==========================================================
+  */
+
+  const response =
+    await fetch(
+      config.token_endpoint,
+      {
+        method:
+          "POST",
+
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+
+        body:
+          body.toString(),
+      }
+    );
 
   const raw =
     await response.text();
 
   if (!response.ok) {
+    console.error(
+      "[Shopify Auth] Token exchange error:",
+      response.status,
+      raw
+    );
+
     throw new Error(
       `Error obteniendo token Shopify (${response.status}): ${raw}`
     );
   }
 
-  const data =
-    JSON.parse(
-      raw
-    ) as TokenResponse;
+  let data:
+    ShopifyCustomerTokenResponse;
+
+  try {
+    data =
+      JSON.parse(
+        raw
+      );
+  } catch {
+    throw new Error(
+      "Shopify devolvió una respuesta de token no válida."
+    );
+  }
+
+  if (
+    !data.access_token
+  ) {
+    throw new Error(
+      "Shopify no devolvió access_token."
+    );
+  }
+
+  /*
+    ==========================================================
+    GUARDAR SESIÓN
+    ==========================================================
+  */
 
   localStorage.setItem(
     ACCESS_TOKEN_KEY,
     data.access_token
   );
 
-  if (data.id_token) {
+  if (
+    data.id_token
+  ) {
     localStorage.setItem(
       ID_TOKEN_KEY,
       data.id_token
     );
   }
 
-  sessionStorage.removeItem(
-    VERIFIER_KEY
-  );
+  if (
+    data.refresh_token
+  ) {
+    localStorage.setItem(
+      REFRESH_TOKEN_KEY,
+      data.refresh_token
+    );
+  }
 
-  sessionStorage.removeItem(
-    STATE_KEY
-  );
+  if (
+    data.expires_in
+  ) {
+    const expiresAt =
+      Date.now() +
+      data.expires_in *
+        1000;
 
-  sessionStorage.removeItem(
-    NONCE_KEY
+    localStorage.setItem(
+      TOKEN_EXPIRES_AT_KEY,
+      String(
+        expiresAt
+      )
+    );
+  }
+
+  /*
+    ==========================================================
+    IMPORTANTÍSIMO
+
+    PRIMERO quitamos el code de la URL.
+    DESPUÉS eliminamos verifier/state.
+
+    Así un nuevo render NO puede reutilizar el authorization code.
+    ==========================================================
+  */
+
+  cleanCallbackUrl();
+
+  clearPkceStorage();
+
+  console.log(
+    "[Shopify Auth] Login completado correctamente."
   );
 
   return data;
 }
 
+/* ============================================================
+   CALLBACK PÚBLICO
+
+   PROTECCIÓN Nº2:
+   todas las llamadas simultáneas comparten LA MISMA Promise.
+   ============================================================ */
+
+export function handleShopifyCustomerCallback(): Promise<ShopifyCustomerTokenResponse> {
+  /*
+    Si ya existe sesión, no hay absolutamente
+    nada que intercambiar.
+  */
+  const existingToken =
+    getShopifyCustomerAccessToken();
+
+  if (
+    existingToken
+  ) {
+    cleanCallbackUrl();
+    clearPkceStorage();
+
+    return Promise.resolve({
+      access_token:
+        existingToken,
+
+      token_type:
+        "Bearer",
+    });
+  }
+
+  if (
+    callbackPromise
+  ) {
+    console.log(
+      "[Shopify Callback] Callback ya en proceso. Reutilizando Promise."
+    );
+
+    return callbackPromise;
+  }
+
+  callbackPromise =
+    exchangeShopifyCustomerCode();
+
+  /*
+    No hacemos callbackPromise = null inmediatamente.
+    La mantenemos durante toda esta navegación.
+  */
+
+  return callbackPromise;
+}
+
+/* ============================================================
+   ACCESS TOKEN
+   ============================================================ */
+
 export function getShopifyCustomerAccessToken() {
-  return localStorage.getItem(
-    ACCESS_TOKEN_KEY
+  return (
+    localStorage.getItem(
+      ACCESS_TOKEN_KEY
+    ) || null
   );
 }
 
+/* ============================================================
+   LOGGED IN
+   ============================================================ */
+
 export function isShopifyCustomerLoggedIn() {
-  return !!getShopifyCustomerAccessToken();
+  const token =
+    getShopifyCustomerAccessToken();
+
+  if (!token) {
+    return false;
+  }
+
+  const expiresAtRaw =
+    localStorage.getItem(
+      TOKEN_EXPIRES_AT_KEY
+    );
+
+  /*
+    Si aún no tenemos expiresAt porque viene
+    de una sesión creada con la versión anterior,
+    consideramos que existe sesión.
+  */
+  if (
+    !expiresAtRaw
+  ) {
+    return true;
+  }
+
+  const expiresAt =
+    Number(
+      expiresAtRaw
+    );
+
+  if (
+    !Number.isFinite(
+      expiresAt
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    Date.now() <
+    expiresAt
+  );
 }
 
+/* ============================================================
+   LIMPIAR SESIÓN LOCAL SHOPIFY
+   ============================================================ */
+
+export function clearShopifyCustomerSession() {
+  localStorage.removeItem(
+    ACCESS_TOKEN_KEY
+  );
+
+  localStorage.removeItem(
+    ID_TOKEN_KEY
+  );
+
+  localStorage.removeItem(
+    REFRESH_TOKEN_KEY
+  );
+
+  localStorage.removeItem(
+    TOKEN_EXPIRES_AT_KEY
+  );
+
+  clearPkceStorage();
+
+  callbackPromise =
+    null;
+}
+
+/* ============================================================
+   LOGOUT
+   ============================================================ */
+
 export async function logoutShopifyCustomer() {
+  ensureConfig();
+
   const config =
     await getCustomerAuthConfig();
 
@@ -391,13 +864,13 @@ export async function logoutShopifyCustomer() {
       ID_TOKEN_KEY
     );
 
-  localStorage.removeItem(
-    ACCESS_TOKEN_KEY
-  );
+  /*
+    Guardamos el origen antes de limpiar.
+  */
+  const postLogoutUri =
+    `${window.location.origin}/`;
 
-  localStorage.removeItem(
-    ID_TOKEN_KEY
-  );
+  clearShopifyCustomerSession();
 
   if (
     config.end_session_endpoint
@@ -407,7 +880,9 @@ export async function logoutShopifyCustomer() {
         config.end_session_endpoint
       );
 
-    if (idToken) {
+    if (
+      idToken
+    ) {
       logoutUrl.searchParams.set(
         "id_token_hint",
         idToken
@@ -416,14 +891,17 @@ export async function logoutShopifyCustomer() {
 
     logoutUrl.searchParams.set(
       "post_logout_redirect_uri",
-      `${window.location.origin}/`
+      postLogoutUri
     );
 
-    window.location.href =
-      logoutUrl.toString();
+    window.location.assign(
+      logoutUrl.toString()
+    );
 
     return;
   }
 
-  window.location.href = "/";
+  window.location.assign(
+    "/"
+  );
 }

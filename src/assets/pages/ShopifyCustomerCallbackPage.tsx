@@ -24,13 +24,15 @@ export default function ShopifyCustomerCallbackPage() {
     );
 
   useEffect(() => {
-    let alive = true;
+    let mounted = true;
 
     async function completeLogin() {
       try {
         await handleShopifyCustomerCallback();
 
-        if (!alive) return;
+        if (!mounted) {
+          return;
+        }
 
         navigate(
           "/perfil-shopify-test",
@@ -44,7 +46,9 @@ export default function ShopifyCustomerCallbackPage() {
           err
         );
 
-        if (!alive) return;
+        if (!mounted) {
+          return;
+        }
 
         setError(
           err instanceof Error
@@ -57,19 +61,19 @@ export default function ShopifyCustomerCallbackPage() {
     void completeLogin();
 
     return () => {
-      alive = false;
+      mounted = false;
     };
   }, [navigate]);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5f1e8] px-4">
       {error ? (
-        <div className="max-w-lg rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+        <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
           <h1 className="font-semibold text-red-700">
             No se pudo iniciar sesión
           </h1>
 
-          <p className="mt-3 text-sm text-gray-600">
+          <p className="mt-3 text-sm leading-6 text-gray-600">
             {error}
           </p>
 
@@ -86,9 +90,13 @@ export default function ShopifyCustomerCallbackPage() {
           </button>
         </div>
       ) : (
-        <p className="text-[#66715d]">
-          Completando inicio de sesión…
-        </p>
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#425530]/20 border-t-[#425530]" />
+
+          <p className="mt-4 text-[#66715d]">
+            Completando inicio de sesión…
+          </p>
+        </div>
       )}
     </main>
   );
