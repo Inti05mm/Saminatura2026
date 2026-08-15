@@ -391,4 +391,4 @@ export default function RelatedBrand({
       </div>
     </div>
   );
-} 
+}  

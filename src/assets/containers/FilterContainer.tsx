@@ -245,10 +245,10 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       type="button"
       onClick={onClick}
       className={[
-        "px-4 py-2 rounded-full text-sm font-semibold border transition whitespace-nowrap",
+        "px-4 py-2.5 rounded-full text-sm font-semibold border shadow-sm transition-all duration-300 whitespace-nowrap",
         active
-          ? "bg-black text-white border-black"
-          : "bg-white text-gray-800 border-gray-200 hover:bg-gray-50",
+          ? "border-[#425530] bg-[#425530] text-white shadow-[0_6px_16px_rgba(66,85,48,0.18)]"
+          : "border-[#dce4d4] bg-white/90 text-[#354526] hover:-translate-y-0.5 hover:border-[#aabd9a] hover:bg-white hover:shadow-md",
       ].join(" ")}
     >
       {label}
@@ -270,10 +270,10 @@ export default function FiltersContainer({ brands, onApply }: Props) {
       type="button"
       onClick={onClick}
       className={[
-        "px-4 py-2 rounded-full text-sm font-semibold border transition flex items-center gap-2 whitespace-nowrap",
+        "px-4 py-2.5 rounded-full text-sm font-semibold border shadow-sm transition-all duration-300 flex items-center gap-2 whitespace-nowrap",
         active
-          ? "bg-black text-white border-black"
-          : "bg-white text-gray-800 border-gray-200 hover:bg-gray-50",
+          ? "border-[#425530] bg-[#425530] text-white shadow-[0_6px_16px_rgba(66,85,48,0.18)]"
+          : "border-[#dce4d4] bg-white/90 text-[#354526] hover:-translate-y-0.5 hover:border-[#aabd9a] hover:bg-white hover:shadow-md",
       ].join(" ")}
     >
       <span>{label}</span>
@@ -326,11 +326,13 @@ export default function FiltersContainer({ brands, onApply }: Props) {
         : "Ordenar";
 
   return (
-    <div ref={rootRef} className="sticky top-0 z-40 w-full bg-[#fbfaf6] py-2">
-      <div className="verde-3 rounded-2xl shadow-sm px-3 py-3">
-        <div className="flex flex-wrap items-center gap-3">
+    <div ref={rootRef} className="sticky top-0 z-40 w-full">
+      <div className="relative overflow-visible rounded-[1.4rem] border border-[#cbd8bf] bg-gradient-to-r from-[#dce7cf] via-[#e8efdf] to-[#d4e1c7] px-4 py-4 shadow-[0_10px_30px_rgba(47,67,31,0.10)]">
+        <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-white/80" />
+
+        <div className="relative flex flex-wrap items-center gap-2.5">
           <Chip
-            label={filters.promotionsOnly ? "✅ Promos" : " Promociones"}
+            label={filters.promotionsOnly ? "Promociones activas" : "Promociones"}
             active={!!filters.promotionsOnly}
             onClick={() =>
               applyInstant({ promotionsOnly: !filters.promotionsOnly })
@@ -351,7 +353,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
               }
             />
             {open === "category" && (
-              <div className="absolute z-20 mt-2 w-64 rounded-2xl border border-gray-200 bg-white shadow-lg p-2">
+              <div className="absolute z-20 mt-3 w-64 rounded-2xl border border-[#dce4d4] bg-[#fffefa] p-2 shadow-[0_18px_45px_rgba(47,67,31,0.16)]">
                 <button
                   type="button"
                   className="w-full text-left px-3 py-2 rounded-xl hover:bg-gray-50 text-sm"
@@ -391,7 +393,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
               onClick={() => setOpen((v) => (v === "brand" ? null : "brand"))}
             />
             {open === "brand" && (
-              <div className="absolute z-20 mt-2 w-64 rounded-2xl border border-gray-200 bg-white shadow-lg p-2 max-h-72 overflow-auto">
+              <div className="absolute z-20 mt-3 max-h-72 w-64 overflow-auto rounded-2xl border border-[#dce4d4] bg-[#fffefa] p-2 shadow-[0_18px_45px_rgba(47,67,31,0.16)]">
                 <button
                   type="button"
                   className="w-full text-left px-3 py-2 rounded-xl hover:bg-gray-50 text-sm"
@@ -435,7 +437,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
               onClick={() => setOpen((v) => (v === "price" ? null : "price"))}
             />
             {open === "price" && (
-              <div className="absolute z-20 mt-2 w-72 rounded-2xl border border-gray-200 bg-white shadow-lg p-3">
+              <div className="absolute z-20 mt-3 w-72 rounded-2xl border border-[#dce4d4] bg-[#fffefa] p-4 shadow-[0_18px_45px_rgba(47,67,31,0.16)]">
                 <div className="text-sm font-semibold text-gray-900 mb-2">
                   Rango de precio
                 </div>
@@ -469,7 +471,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
                 <div className="flex gap-2 mt-3">
                   <button
                     type="button"
-                    className="flex-1 py-2 rounded-xl bg-black text-white font-semibold"
+                    className="flex-1 rounded-xl bg-[#425530] py-2.5 font-semibold text-white transition hover:bg-[#354526]"
                     onClick={() => {
                       applyPriceNow();
                       setOpen(null);
@@ -508,7 +510,7 @@ export default function FiltersContainer({ brands, onApply }: Props) {
               onClick={() => setOpen((v) => (v === "sort" ? null : "sort"))}
             />
             {open === "sort" && (
-              <div className="absolute z-20 mt-2 w-56 rounded-2xl border border-gray-200 bg-white shadow-lg p-2">
+              <div className="absolute z-20 mt-3 w-56 rounded-2xl border border-[#dce4d4] bg-[#fffefa] p-2 shadow-[0_18px_45px_rgba(47,67,31,0.16)]">
                 <button
                   type="button"
                   className={[
@@ -583,10 +585,10 @@ export default function FiltersContainer({ brands, onApply }: Props) {
               onClick={clearAll}
               disabled={!canClear}
               className={[
-                "px-5 py-2 rounded-full font-semibold",
+                "rounded-full border px-5 py-2.5 font-semibold shadow-sm transition-all duration-300",
                 canClear
-                  ? "bg-gray-100 text-gray-800 hover:bg-gray-200"
-                  : "bg-gray-50 text-gray-400 cursor-not-allowed",
+                  ? "border-white/80 bg-white/85 text-[#354526] hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+                  : "cursor-not-allowed border-white/40 bg-white/35 text-[#8e9a85]",
               ].join(" ")}
             >
               Ver todo

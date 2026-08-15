@@ -57,7 +57,7 @@ export default function ShopifyUserPage() {
                 type="button"
                 onClick={() =>
                   navigate(
-                    "/perfil-shopify-test"
+                    "/perfil"
                   )
                 }
                 className="mt-6 w-full rounded-xl bg-[#425530] px-5 py-3.5 font-semibold text-white transition hover:bg-[#344526]"

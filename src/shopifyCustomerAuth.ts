@@ -4,12 +4,16 @@ const SHOP_DOMAIN =
 const CLIENT_ID =
   import.meta.env.VITE_SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID?.trim();
 
-const REDIRECT_URI =
-  `${window.location.origin}/auth/shopify/callback`;
+const PUBLIC_URL =
+  import.meta.env
+    .VITE_PUBLIC_URL
+    ?.trim()
+    .replace(/\/+$/, "");
 
-/* ============================================================
-   STORAGE KEYS
-   ============================================================ */
+const REDIRECT_URI =
+  PUBLIC_URL
+    ? `${PUBLIC_URL}/auth/shopify/callback`
+    : undefined;
 
 const VERIFIER_KEY =
   "shopify_customer_pkce_verifier";
@@ -32,10 +36,6 @@ const REFRESH_TOKEN_KEY =
 const TOKEN_EXPIRES_AT_KEY =
   "shopify_customer_token_expires_at";
 
-/* ============================================================
-   TYPES
-   ============================================================ */
-
 type OpenIdConfig = {
   authorization_endpoint: string;
   token_endpoint: string;
@@ -46,27 +46,19 @@ type OpenIdConfig = {
 export type ShopifyCustomerTokenResponse = {
   access_token: string;
   token_type: string;
-
   expires_in?: number;
   scope?: string;
-
   id_token?: string;
   refresh_token?: string;
 };
-
-/* ============================================================
-   CALLBACK LOCK
-
-   Evita canjear dos veces el mismo authorization code.
-   ============================================================ */
 
 let callbackPromise:
   | Promise<ShopifyCustomerTokenResponse>
   | null = null;
 
-/* ============================================================
-   CONFIG
-   ============================================================ */
+let refreshPromise:
+  | Promise<string | null>
+  | null = null;
 
 function ensureConfig() {
   if (!SHOP_DOMAIN) {
@@ -81,12 +73,18 @@ function ensureConfig() {
     );
   }
 
+  if (!PUBLIC_URL) {
+    throw new Error(
+      "Falta VITE_PUBLIC_URL."
+    );
+  }
 
+  if (!REDIRECT_URI) {
+    throw new Error(
+      "No se pudo construir REDIRECT_URI."
+    );
+  }
 }
-
-/* ============================================================
-   BASE64 URL
-   ============================================================ */
 
 function bytesToBase64Url(
   bytes: Uint8Array
@@ -110,10 +108,6 @@ function bytesToBase64Url(
     .replace(/=+$/g, "");
 }
 
-/* ============================================================
-   RANDOM BYTES
-   ============================================================ */
-
 function randomBytes(
   length: number
 ) {
@@ -128,14 +122,6 @@ function randomBytes(
 
   return bytes;
 }
-
-/* ============================================================
-   PKCE
-
-   Shopify:
-   verifier = random 32 bytes -> base64url
-   challenge = SHA256(verifier) -> base64url
-   ============================================================ */
 
 function generateCodeVerifier() {
   return bytesToBase64Url(
@@ -164,19 +150,11 @@ async function createCodeChallenge(
   );
 }
 
-/* ============================================================
-   STATE / NONCE
-   ============================================================ */
-
 function generateSecureValue() {
   return bytesToBase64Url(
     randomBytes(32)
   );
 }
-
-/* ============================================================
-   DISCOVERY
-   ============================================================ */
 
 export async function getCustomerAuthConfig(): Promise<OpenIdConfig> {
   ensureConfig();
@@ -195,10 +173,6 @@ export async function getCustomerAuthConfig(): Promise<OpenIdConfig> {
   return response.json();
 }
 
-/* ============================================================
-   LIMPIAR PKCE TEMPORAL
-   ============================================================ */
-
 function clearPkceStorage() {
   sessionStorage.removeItem(
     VERIFIER_KEY
@@ -212,14 +186,6 @@ function clearPkceStorage() {
     NONCE_KEY
   );
 }
-
-/* ============================================================
-   LIMPIAR CODE DE LA URL
-
-   IMPORTANTÍSIMO:
-   una vez usado el code no queremos que React pueda volver
-   a procesarlo al remontar el componente.
-   ============================================================ */
 
 function cleanCallbackUrl() {
   const url =
@@ -252,25 +218,263 @@ function cleanCallbackUrl() {
   );
 }
 
-/* ============================================================
-   LOGIN
-   ============================================================ */
+function saveShopifyCustomerTokens(
+  data:
+    ShopifyCustomerTokenResponse
+) {
+  if (!data.access_token) {
+    throw new Error(
+      "Shopify no devolvió access_token."
+    );
+  }
+
+  localStorage.setItem(
+    ACCESS_TOKEN_KEY,
+    data.access_token
+  );
+
+  if (data.id_token) {
+    localStorage.setItem(
+      ID_TOKEN_KEY,
+      data.id_token
+    );
+  }
+
+  if (data.refresh_token) {
+    localStorage.setItem(
+      REFRESH_TOKEN_KEY,
+      data.refresh_token
+    );
+  }
+
+  if (data.expires_in) {
+    const expiresAt =
+      Date.now() +
+      data.expires_in *
+        1000;
+
+    localStorage.setItem(
+      TOKEN_EXPIRES_AT_KEY,
+      String(
+        expiresAt
+      )
+    );
+  } else {
+    localStorage.removeItem(
+      TOKEN_EXPIRES_AT_KEY
+    );
+  }
+}
+
+export function getShopifyCustomerAccessToken() {
+  return (
+    localStorage.getItem(
+      ACCESS_TOKEN_KEY
+    ) || null
+  );
+}
+
+export function getShopifyCustomerRefreshToken() {
+  return (
+    localStorage.getItem(
+      REFRESH_TOKEN_KEY
+    ) || null
+  );
+}
+
+function getTokenExpiresAt() {
+  const raw =
+    localStorage.getItem(
+      TOKEN_EXPIRES_AT_KEY
+    );
+
+  if (!raw) {
+    return null;
+  }
+
+  const value =
+    Number(raw);
+
+  return Number.isFinite(
+    value
+  )
+    ? value
+    : null;
+}
+
+function isAccessTokenExpired(
+  safetyWindowMs =
+    30_000
+) {
+  const expiresAt =
+    getTokenExpiresAt();
+
+  if (expiresAt === null) {
+    return false;
+  }
+
+  return (
+    Date.now() +
+      safetyWindowMs >=
+    expiresAt
+  );
+}
+
+export function clearShopifyCustomerSession() {
+  localStorage.removeItem(
+    ACCESS_TOKEN_KEY
+  );
+
+  localStorage.removeItem(
+    ID_TOKEN_KEY
+  );
+
+  localStorage.removeItem(
+    REFRESH_TOKEN_KEY
+  );
+
+  localStorage.removeItem(
+    TOKEN_EXPIRES_AT_KEY
+  );
+
+  clearPkceStorage();
+
+  callbackPromise =
+    null;
+
+  refreshPromise =
+    null;
+}
+
+async function doRefreshShopifyCustomerAccessToken(): Promise<string | null> {
+  ensureConfig();
+
+  const refreshToken =
+    getShopifyCustomerRefreshToken();
+
+  if (!refreshToken) {
+    clearShopifyCustomerSession();
+    return null;
+  }
+
+  const config =
+    await getCustomerAuthConfig();
+
+  const body =
+    new URLSearchParams({
+      grant_type:
+        "refresh_token",
+      client_id:
+        CLIENT_ID!,
+      refresh_token:
+        refreshToken,
+    });
+
+  const response =
+    await fetch(
+      config.token_endpoint,
+      {
+        method:
+          "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+        body:
+          body.toString(),
+      }
+    );
+
+  const raw =
+    await response.text();
+
+  if (!response.ok) {
+    console.error(
+      "[Shopify Auth] Error refrescando token:",
+      response.status,
+      raw
+    );
+
+    clearShopifyCustomerSession();
+    return null;
+  }
+
+  let data:
+    ShopifyCustomerTokenResponse;
+
+  try {
+    data =
+      JSON.parse(
+        raw
+      );
+  } catch {
+    clearShopifyCustomerSession();
+
+    throw new Error(
+      "Shopify devolvió una respuesta de refresh no válida."
+    );
+  }
+
+  if (!data.access_token) {
+    clearShopifyCustomerSession();
+    return null;
+  }
+
+  saveShopifyCustomerTokens(
+    data
+  );
+
+  console.log(
+    "[Shopify Auth] Access token renovado correctamente."
+  );
+
+  return data.access_token;
+}
+
+export function refreshShopifyCustomerAccessToken(): Promise<string | null> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise =
+    doRefreshShopifyCustomerAccessToken()
+      .finally(
+        () => {
+          refreshPromise =
+            null;
+        }
+      );
+
+  return refreshPromise;
+}
+
+export async function getValidShopifyCustomerAccessToken(): Promise<string | null> {
+  const accessToken =
+    getShopifyCustomerAccessToken();
+
+  if (!accessToken) {
+    return null;
+  }
+
+  if (
+    !isAccessTokenExpired()
+  ) {
+    return accessToken;
+  }
+
+  return refreshShopifyCustomerAccessToken();
+}
 
 export async function loginWithShopifyCustomer() {
   ensureConfig();
 
-  /*
-    Si YA estamos autenticados,
-    no abrimos otro OAuth.
-  */
   const existingToken =
-    getShopifyCustomerAccessToken();
+    await getValidShopifyCustomerAccessToken();
 
   if (existingToken) {
     console.log(
       "[Shopify Auth] Ya existe una sesión activa."
     );
-
     return;
   }
 
@@ -291,9 +495,6 @@ export async function loginWithShopifyCustomer() {
   const nonce =
     generateSecureValue();
 
-  /*
-    Guardar ANTES de salir de nuestra web.
-  */
   sessionStorage.setItem(
     VERIFIER_KEY,
     verifier
@@ -364,48 +565,13 @@ export async function loginWithShopifyCustomer() {
     "ES"
   );
 
-
-
   window.location.assign(
     url.toString()
   );
 }
 
-/* ============================================================
-   CALLBACK REAL
-   ============================================================ */
-
 async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenResponse> {
   ensureConfig();
-
-  /*
-    ==========================================================
-    PROTECCIÓN Nº1
-
-    Si otro montaje del componente YA consiguió el token,
-    NO volvemos a utilizar el authorization code.
-    ==========================================================
-  */
-
-  const existingToken =
-    getShopifyCustomerAccessToken();
-
-  if (existingToken) {
-    console.log(
-      "[Shopify Callback] El token ya existe. No se vuelve a canjear el code."
-    );
-
-    cleanCallbackUrl();
-    clearPkceStorage();
-
-    return {
-      access_token:
-        existingToken,
-
-      token_type:
-        "Bearer",
-    };
-  }
 
   const params =
     new URLSearchParams(
@@ -440,6 +606,21 @@ async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenRespon
     );
 
   if (!code) {
+    const existingToken =
+      await getValidShopifyCustomerAccessToken();
+
+    if (existingToken) {
+      cleanCallbackUrl();
+      clearPkceStorage();
+
+      return {
+        access_token:
+          existingToken,
+        token_type:
+          "Bearer",
+      };
+    }
+
     throw new Error(
       "Shopify no devolvió un código de autorización."
     );
@@ -479,40 +660,18 @@ async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenRespon
   const config =
     await getCustomerAuthConfig();
 
-  /*
-    Shopify requiere los mismos:
-    - client_id
-    - redirect_uri
-    - authorization code
-    - code_verifier
-  */
   const body =
     new URLSearchParams({
       grant_type:
         "authorization_code",
-
       client_id:
         CLIENT_ID!,
-
       redirect_uri:
         REDIRECT_URI!,
-
       code,
-
       code_verifier:
         verifier,
     });
-
-  /*
-    ==========================================================
-    DEBUG
-
-    NO imprimimos:
-    - code
-    - verifier
-    - token
-    ==========================================================
-  */
 
   console.log(
     "=== SHOPIFY TOKEN DEBUG ==="
@@ -559,24 +718,16 @@ async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenRespon
     verifier.length
   );
 
-  /*
-    ==========================================================
-    TOKEN EXCHANGE
-    ==========================================================
-  */
-
   const response =
     await fetch(
       config.token_endpoint,
       {
         method:
           "POST",
-
         headers: {
           "Content-Type":
             "application/x-www-form-urlencoded",
         },
-
         body:
           body.toString(),
       }
@@ -611,72 +762,16 @@ async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenRespon
     );
   }
 
-  if (
-    !data.access_token
-  ) {
-    throw new Error(
-      "Shopify no devolvió access_token."
-    );
-  }
-
-  /*
-    ==========================================================
-    GUARDAR SESIÓN
-    ==========================================================
-  */
-
-  localStorage.setItem(
-    ACCESS_TOKEN_KEY,
-    data.access_token
+  saveShopifyCustomerTokens(
+    data
   );
 
-  if (
-    data.id_token
-  ) {
-    localStorage.setItem(
-      ID_TOKEN_KEY,
-      data.id_token
-    );
-  }
-
-  if (
-    data.refresh_token
-  ) {
-    localStorage.setItem(
-      REFRESH_TOKEN_KEY,
-      data.refresh_token
-    );
-  }
-
-  if (
-    data.expires_in
-  ) {
-    const expiresAt =
-      Date.now() +
-      data.expires_in *
-        1000;
-
-    localStorage.setItem(
-      TOKEN_EXPIRES_AT_KEY,
-      String(
-        expiresAt
-      )
-    );
-  }
-
-  /*
-    ==========================================================
-    IMPORTANTÍSIMO
-
-    PRIMERO quitamos el code de la URL.
-    DESPUÉS eliminamos verifier/state.
-
-    Así un nuevo render NO puede reutilizar el authorization code.
-    ==========================================================
-  */
+  sessionStorage.setItem(
+    "shopify_login_just_completed",
+    "1"
+  );
 
   cleanCallbackUrl();
-
   clearPkceStorage();
 
   console.log(
@@ -686,39 +781,38 @@ async function exchangeShopifyCustomerCode(): Promise<ShopifyCustomerTokenRespon
   return data;
 }
 
-/* ============================================================
-   CALLBACK PÚBLICO
-
-   PROTECCIÓN Nº2:
-   todas las llamadas simultáneas comparten LA MISMA Promise.
-   ============================================================ */
-
 export function handleShopifyCustomerCallback(): Promise<ShopifyCustomerTokenResponse> {
-  /*
-    Si ya existe sesión, no hay absolutamente
-    nada que intercambiar.
-  */
-  const existingToken =
-    getShopifyCustomerAccessToken();
+  const params =
+    new URLSearchParams(
+      window.location.search
+    );
 
-  if (
-    existingToken
-  ) {
-    cleanCallbackUrl();
-    clearPkceStorage();
+  const code =
+    params.get(
+      "code"
+    );
 
-    return Promise.resolve({
-      access_token:
-        existingToken,
+  if (!code) {
+    const existingToken =
+      getShopifyCustomerAccessToken();
 
-      token_type:
-        "Bearer",
-    });
+    if (
+      existingToken &&
+      !isAccessTokenExpired()
+    ) {
+      cleanCallbackUrl();
+      clearPkceStorage();
+
+      return Promise.resolve({
+        access_token:
+          existingToken,
+        token_type:
+          "Bearer",
+      });
+    }
   }
 
-  if (
-    callbackPromise
-  ) {
+  if (callbackPromise) {
     console.log(
       "[Shopify Callback] Callback ya en proceso. Reutilizando Promise."
     );
@@ -729,103 +823,34 @@ export function handleShopifyCustomerCallback(): Promise<ShopifyCustomerTokenRes
   callbackPromise =
     exchangeShopifyCustomerCode();
 
-  /*
-    No hacemos callbackPromise = null inmediatamente.
-    La mantenemos durante toda esta navegación.
-  */
-
   return callbackPromise;
 }
 
-/* ============================================================
-   ACCESS TOKEN
-   ============================================================ */
-
-export function getShopifyCustomerAccessToken() {
-  return (
-    localStorage.getItem(
-      ACCESS_TOKEN_KEY
-    ) || null
-  );
-}
-
-/* ============================================================
-   LOGGED IN
-   ============================================================ */
-
 export function isShopifyCustomerLoggedIn() {
-  const token =
+  const accessToken =
     getShopifyCustomerAccessToken();
 
-  if (!token) {
+  const refreshToken =
+    getShopifyCustomerRefreshToken();
+
+  if (
+    !accessToken &&
+    !refreshToken
+  ) {
     return false;
   }
 
-  const expiresAtRaw =
-    localStorage.getItem(
-      TOKEN_EXPIRES_AT_KEY
-    );
-
-  /*
-    Si aún no tenemos expiresAt porque viene
-    de una sesión creada con la versión anterior,
-    consideramos que existe sesión.
-  */
-  if (
-    !expiresAtRaw
-  ) {
+  if (refreshToken) {
     return true;
   }
 
-  const expiresAt =
-    Number(
-      expiresAtRaw
-    );
-
-  if (
-    !Number.isFinite(
-      expiresAt
+  return Boolean(
+    accessToken &&
+    !isAccessTokenExpired(
+      0
     )
-  ) {
-    return true;
-  }
-
-  return (
-    Date.now() <
-    expiresAt
   );
 }
-
-/* ============================================================
-   LIMPIAR SESIÓN LOCAL SHOPIFY
-   ============================================================ */
-
-export function clearShopifyCustomerSession() {
-  localStorage.removeItem(
-    ACCESS_TOKEN_KEY
-  );
-
-  localStorage.removeItem(
-    ID_TOKEN_KEY
-  );
-
-  localStorage.removeItem(
-    REFRESH_TOKEN_KEY
-  );
-
-  localStorage.removeItem(
-    TOKEN_EXPIRES_AT_KEY
-  );
-
-  clearPkceStorage();
-
-  callbackPromise =
-    null;
-}
-
-/* ============================================================
-   LOGOUT
-   ============================================================ */
 
 export async function logoutShopifyCustomer() {
   ensureConfig();
@@ -838,11 +863,8 @@ export async function logoutShopifyCustomer() {
       ID_TOKEN_KEY
     );
 
-  /*
-    Guardamos el origen antes de limpiar.
-  */
   const postLogoutUri =
-    `${window.location.origin}/`;
+  `${PUBLIC_URL}/`;
 
   clearShopifyCustomerSession();
 
@@ -854,9 +876,7 @@ export async function logoutShopifyCustomer() {
         config.end_session_endpoint
       );
 
-    if (
-      idToken
-    ) {
+    if (idToken) {
       logoutUrl.searchParams.set(
         "id_token_hint",
         idToken

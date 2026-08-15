@@ -58,7 +58,7 @@ export default function ShopifyCustomerCallbackPage() {
 reloadCustomerSession();
 
 navigate(
-  "/perfil-shopify-test",
+  "/perfil",
   {
     replace: true,
   }
@@ -107,7 +107,7 @@ navigate(
             type="button"
             onClick={() =>
               navigate(
-                "/usuario-shopify-test"
+                "/usuario"
               )
             }
             className="mt-5 rounded-full bg-[#425530] px-5 py-2.5 font-semibold text-white"

@@ -1,5 +1,7 @@
 import {
-  getShopifyCustomerAccessToken,
+  clearShopifyCustomerSession,
+  getValidShopifyCustomerAccessToken,
+  refreshShopifyCustomerAccessToken,
 } from "./shopifyCustomerAuth";
 
 const SHOP_DOMAIN =
@@ -15,18 +17,10 @@ type ShopifyUserError = {
   code?: string | null;
 };
 
-/* ============================================================
-   MONEY
-   ============================================================ */
-
 export type ShopifyMoney = {
   amount: string;
   currencyCode: string;
 };
-
-/* ============================================================
-   DIRECCIONES
-   ============================================================ */
 
 export type ShopifyCustomerAddress = {
   id: string;
@@ -53,10 +47,6 @@ export type ShopifyCustomerAddress = {
 
   formattedArea: string | null;
 };
-
-/* ============================================================
-   PEDIDOS
-   ============================================================ */
 
 export type ShopifyOrderLineItem = {
   id: string;
@@ -129,12 +119,10 @@ export type ShopifyCustomerOrder = {
   statusPageUrl: string;
 };
 
-/* ============================================================
-   CLIENTE
-   ============================================================ */
-
 export type ShopifyCustomer = {
   id: string;
+
+  creationDate: string;
 
   firstName: string | null;
   lastName: string | null;
@@ -162,10 +150,6 @@ export type ShopifyCustomer = {
   };
 };
 
-/* ============================================================
-   INPUTS
-   ============================================================ */
-
 export type UpdateCustomerInput = {
   firstName?: string;
   lastName?: string;
@@ -189,10 +173,6 @@ export type CustomerAddressInput = {
 
   phoneNumber?: string;
 };
-
-/* ============================================================
-   HELPERS
-   ============================================================ */
 
 function ensureShopDomain() {
   if (!SHOP_DOMAIN) {
@@ -222,16 +202,13 @@ function throwUserErrors(
   );
 }
 
-/* ============================================================
-   CUSTOMER ACCOUNT API CONFIG
-   ============================================================ */
-
 export async function getCustomerApiConfig(): Promise<CustomerApiConfig> {
   ensureShopDomain();
 
-  const response = await fetch(
-    `https://${SHOP_DOMAIN}/.well-known/customer-account-api`
-  );
+  const response =
+    await fetch(
+      `https://${SHOP_DOMAIN}/.well-known/customer-account-api`
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -242,10 +219,6 @@ export async function getCustomerApiConfig(): Promise<CustomerApiConfig> {
   return response.json();
 }
 
-/* ============================================================
-   CUSTOMER ACCOUNT FETCH
-   ============================================================ */
-
 export async function customerAccountFetch<T>(
   query: string,
   variables: Record<
@@ -253,8 +226,39 @@ export async function customerAccountFetch<T>(
     unknown
   > = {}
 ): Promise<T> {
-  const accessToken =
-    getShopifyCustomerAccessToken();
+  const config =
+    await getCustomerApiConfig();
+
+  const executeRequest =
+    async (
+      accessToken:
+        string
+    ) => {
+      return fetch(
+        config.graphql_api,
+        {
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            Authorization:
+              accessToken,
+          },
+
+          body:
+            JSON.stringify({
+              query,
+              variables,
+            }),
+        }
+      );
+    };
+
+  let accessToken =
+    await getValidShopifyCustomerAccessToken();
 
   if (!accessToken) {
     throw new Error(
@@ -262,31 +266,52 @@ export async function customerAccountFetch<T>(
     );
   }
 
-  const config =
-    await getCustomerApiConfig();
+  let response =
+    await executeRequest(
+      accessToken
+    );
 
-  const response = await fetch(
-    config.graphql_api,
-    {
-      method: "POST",
+  if (
+    response.status ===
+    401
+  ) {
+    console.warn(
+      "[Shopify Customer API] Access token rechazado. Intentando refresh..."
+    );
 
-      headers: {
-        "Content-Type":
-          "application/json",
+    const refreshedToken =
+      await refreshShopifyCustomerAccessToken();
 
-        Authorization:
-          accessToken,
-      },
+    if (!refreshedToken) {
+      clearShopifyCustomerSession();
 
-      body: JSON.stringify({
-        query,
-        variables,
-      }),
+      throw new Error(
+        "Tu sesión de Shopify ha caducado o ha sido revocada. Vuelve a iniciar sesión."
+      );
     }
-  );
+
+    accessToken =
+      refreshedToken;
+
+    response =
+      await executeRequest(
+        accessToken
+      );
+  }
 
   const raw =
     await response.text();
+
+  if (
+    response.status ===
+    401
+  ) {
+    clearShopifyCustomerSession();
+
+    throw new Error(
+      "Tu sesión de Shopify ya no es válida. Vuelve a iniciar sesión."
+    );
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -298,7 +323,9 @@ export async function customerAccountFetch<T>(
 
   try {
     parsed =
-      JSON.parse(raw);
+      JSON.parse(
+        raw
+      );
   } catch {
     throw new Error(
       "Shopify devolvió una respuesta no válida."
@@ -311,7 +338,10 @@ export async function customerAccountFetch<T>(
     throw new Error(
       parsed.errors
         .map(
-          (error: any) =>
+          (
+            error:
+              any
+          ) =>
             error.message ??
             JSON.stringify(
               error
@@ -321,17 +351,21 @@ export async function customerAccountFetch<T>(
     );
   }
 
+  if (!parsed.data) {
+    throw new Error(
+      "Shopify no devolvió datos."
+    );
+  }
+
   return parsed.data as T;
 }
-
-/* ============================================================
-   CLIENTE + DIRECCIONES + PEDIDOS
-   ============================================================ */
 
 const CUSTOMER_QUERY = `
   query Customer {
     customer {
       id
+
+      creationDate
 
       firstName
       lastName
@@ -526,10 +560,6 @@ export async function getShopifyCustomer() {
   return data.customer;
 }
 
-/* ============================================================
-   ACTUALIZAR NOMBRE / APELLIDOS
-   ============================================================ */
-
 const CUSTOMER_UPDATE_MUTATION = `
   mutation CustomerUpdate(
     $input: CustomerUpdateInput!
@@ -562,7 +592,8 @@ const CUSTOMER_UPDATE_MUTATION = `
 `;
 
 export async function updateShopifyCustomer(
-  input: UpdateCustomerInput
+  input:
+    UpdateCustomerInput
 ) {
   const data =
     await customerAccountFetch<{
@@ -579,19 +610,23 @@ export async function updateShopifyCustomer(
                 | string
                 | null;
 
-              displayName: string;
+              displayName:
+                string;
 
               emailAddress: {
-                emailAddress: string;
+                emailAddress:
+                  string;
               } | null;
 
               phoneNumber: {
-                phoneNumber: string;
+                phoneNumber:
+                  string;
               } | null;
             }
           | null;
 
-        userErrors: ShopifyUserError[];
+        userErrors:
+          ShopifyUserError[];
       };
     }>(
       CUSTOMER_UPDATE_MUTATION,
@@ -617,10 +652,6 @@ export async function updateShopifyCustomer(
   return data.customerUpdate
     .customer;
 }
-
-/* ============================================================
-   CREAR DIRECCIÓN
-   ============================================================ */
 
 const ADDRESS_CREATE_MUTATION = `
   mutation CustomerAddressCreate(
@@ -666,8 +697,10 @@ const ADDRESS_CREATE_MUTATION = `
 `;
 
 export async function createShopifyCustomerAddress(
-  address: CustomerAddressInput,
-  defaultAddress = false
+  address:
+    CustomerAddressInput,
+  defaultAddress =
+    false
 ) {
   const data =
     await customerAccountFetch<{
@@ -676,7 +709,8 @@ export async function createShopifyCustomerAddress(
           | ShopifyCustomerAddress
           | null;
 
-        userErrors: ShopifyUserError[];
+        userErrors:
+          ShopifyUserError[];
       };
     }>(
       ADDRESS_CREATE_MUTATION,
@@ -705,10 +739,6 @@ export async function createShopifyCustomerAddress(
     .customerAddressCreate
     .customerAddress;
 }
-
-/* ============================================================
-   ACTUALIZAR DIRECCIÓN
-   ============================================================ */
 
 const ADDRESS_UPDATE_MUTATION = `
   mutation CustomerAddressUpdate(
@@ -756,9 +786,12 @@ const ADDRESS_UPDATE_MUTATION = `
 `;
 
 export async function updateShopifyCustomerAddress(
-  addressId: string,
-  address: CustomerAddressInput,
-  defaultAddress = false
+  addressId:
+    string,
+  address:
+    CustomerAddressInput,
+  defaultAddress =
+    false
 ) {
   const data =
     await customerAccountFetch<{
@@ -767,7 +800,8 @@ export async function updateShopifyCustomerAddress(
           | ShopifyCustomerAddress
           | null;
 
-        userErrors: ShopifyUserError[];
+        userErrors:
+          ShopifyUserError[];
       };
     }>(
       ADDRESS_UPDATE_MUTATION,
@@ -798,10 +832,6 @@ export async function updateShopifyCustomerAddress(
     .customerAddress;
 }
 
-/* ============================================================
-   ELIMINAR DIRECCIÓN
-   ============================================================ */
-
 const ADDRESS_DELETE_MUTATION = `
   mutation CustomerAddressDelete(
     $addressId: ID!
@@ -821,7 +851,8 @@ const ADDRESS_DELETE_MUTATION = `
 `;
 
 export async function deleteShopifyCustomerAddress(
-  addressId: string
+  addressId:
+    string
 ) {
   const data =
     await customerAccountFetch<{
@@ -830,7 +861,8 @@ export async function deleteShopifyCustomerAddress(
           | string
           | null;
 
-        userErrors: ShopifyUserError[];
+        userErrors:
+          ShopifyUserError[];
       };
     }>(
       ADDRESS_DELETE_MUTATION,

@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 
-import Inicio from "../containers/Inicio";
-import Carousel from "../containers/Carousel";
-import Footer from "../containers/Footer";
-import Categories from "../containers/Categories";
-import VIsitUs from "../containers/VisitUs";
-import Mapa from "../containers/Mapa";
-import Header from "../containers/Header";
-import HeroSaminatura from "../containers/HeroSaminatura.tsx";
-import NewProductsCarousel from "../containers/NewProductsCarousel.tsx"
+import Carousel from "../containers/ShopifyCarousel.tsx";
+import Footer from "../containers/Footer.tsx";
+import Categories from "../containers/Categories.tsx";
+import Mapa from "../containers/Mapa.tsx";
+import Header from "../containers/Header.tsx";
+import HeroSaminatura from "../containers/ShopifyHeroInicio.tsx";
+import NewProductsCarousel from "../containers/ShopifyNewProductsCarousel.tsx"
 import DietaryOptions from "../containers/DietaryOptions.tsx"
 import MarcasInicio from "../containers/MarcasInicio.tsx";
 
@@ -40,7 +38,7 @@ export default function HomePage() {
   }, [toast]);
 
   return (
-    <main className="min-h-screen gris">
+    <main className="min-h-screen">
       {/* ✅ TOAST TOP RIGHT */}
       {toast && (
         <div className="fixed top-4 right-4 z-50">
@@ -68,7 +66,7 @@ export default function HomePage() {
       )}
 
       <Header />
-      <Inicio/>
+      <HeroSaminatura/>
       <NewProductsCarousel/>
       <Categories /> 
             <MarcasInicio/>

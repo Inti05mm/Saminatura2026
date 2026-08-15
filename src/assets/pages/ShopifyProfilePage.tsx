@@ -10,6 +10,7 @@ import {
 
 import Header from "../containers/Header";
 import Footer from "../containers/Footer";
+import saminaturaLogo from "../pictures/logo_2.png";
 
 import {
   createShopifyCustomerAddress,
@@ -234,6 +235,73 @@ function fulfillmentStatusLabel(
   }
 }
 
+function formatCurrencyAmount(
+  amount: number,
+  currencyCode: string
+) {
+  try {
+    return new Intl.NumberFormat(
+      "es-ES",
+      {
+        style: "currency",
+        currency: currencyCode,
+      }
+    ).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currencyCode}`;
+  }
+}
+
+async function imageUrlToDataUrl(
+  url: string
+) {
+  const response =
+    await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `No se pudo cargar el logo: ${response.status}`
+    );
+  }
+
+  const blob =
+    await response.blob();
+
+  return await new Promise<string>(
+    (
+      resolve,
+      reject
+    ) => {
+      const reader =
+        new FileReader();
+
+      reader.onloadend = () => {
+        if (
+          typeof reader.result ===
+          "string"
+        ) {
+          resolve(reader.result);
+        } else {
+          reject(
+            new Error(
+              "No se pudo convertir el logo."
+            )
+          );
+        }
+      };
+
+      reader.onerror = () =>
+        reject(
+          new Error(
+            "No se pudo leer el logo."
+          )
+        );
+
+      reader.readAsDataURL(blob);
+    }
+  );
+}
+
 /* ============================================================
    COMPONENTE PRINCIPAL
    ============================================================ */
@@ -268,6 +336,12 @@ export default function ShopifyProfilePage() {
     setWelcomeOpen,
   ] =
     useState(false);
+
+  const [
+    welcomeType,
+    setWelcomeType,
+  ] =
+    useState<"new" | "incomplete">("new");
 
   const [
     loading,
@@ -371,6 +445,14 @@ export default function ShopifyProfilePage() {
       null
     );
 
+  const [
+    selectedOrder,
+    setSelectedOrder,
+  ] =
+    useState<ShopifyCustomerOrder | null>(
+      null
+    );
+
   const defaultAddressId =
     customer
       ?.defaultAddress
@@ -393,6 +475,676 @@ export default function ShopifyProfilePage() {
           .nodes ?? [],
       [customer]
     );
+
+  useEffect(() => {
+    if (!selectedOrder) {
+      return;
+    }
+
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow =
+      "hidden";
+
+    const handleKeyDown = (
+      event: KeyboardEvent
+    ) => {
+      if (event.key === "Escape") {
+        setSelectedOrder(null);
+      }
+    };
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown
+    );
+
+    return () => {
+      document.body.style.overflow =
+        previousOverflow;
+
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown
+      );
+    };
+  }, [selectedOrder]);
+
+  const downloadOrderPdf =
+    async (
+      order: ShopifyCustomerOrder
+    ) => {
+      try {
+        const { jsPDF } =
+          await import("jspdf");
+
+        const doc =
+          new jsPDF({
+            orientation: "portrait",
+            unit: "mm",
+            format: "a4",
+          });
+
+        const pageWidth =
+          doc.internal.pageSize.getWidth();
+
+        const pageHeight =
+          doc.internal.pageSize.getHeight();
+
+        const margin = 16;
+        const contentWidth =
+          pageWidth - margin * 2;
+
+        const colors = {
+          green: [66, 85, 48] as [number, number, number],
+          greenDark: [38, 52, 31] as [number, number, number],
+          greenSoft: [243, 246, 239] as [number, number, number],
+          cream: [249, 247, 241] as [number, number, number],
+          border: [220, 226, 215] as [number, number, number],
+          text: [43, 54, 37] as [number, number, number],
+          muted: [111, 123, 103] as [number, number, number],
+          white: [255, 255, 255] as [number, number, number],
+        };
+
+        let y = 14;
+
+        const ensureSpace = (
+          needed: number
+        ) => {
+          if (
+            y + needed <=
+            pageHeight - 22
+          ) {
+            return;
+          }
+
+          doc.addPage();
+          y = 18;
+        };
+
+        const addFooter = () => {
+          const totalPages =
+            doc.getNumberOfPages();
+
+          for (
+            let page = 1;
+            page <= totalPages;
+            page++
+          ) {
+            doc.setPage(page);
+            doc.setDrawColor(...colors.border);
+            doc.line(
+              margin,
+              pageHeight - 14,
+              pageWidth - margin,
+              pageHeight - 14
+            );
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7.5);
+            doc.setTextColor(...colors.muted);
+            doc.text(
+              "SAMINATURA · Natural · Bio · Bienestar",
+              margin,
+              pageHeight - 8
+            );
+            doc.text(
+              `Página ${page} de ${totalPages}`,
+              pageWidth - margin,
+              pageHeight - 8,
+              { align: "right" }
+            );
+          }
+        };
+
+        /* CABECERA */
+        doc.setFillColor(...colors.cream);
+        doc.roundedRect(
+          margin,
+          y,
+          contentWidth,
+          34,
+          4,
+          4,
+          "F"
+        );
+
+        try {
+          const logoDataUrl =
+            await imageUrlToDataUrl(
+              saminaturaLogo
+            );
+
+          doc.addImage(
+            logoDataUrl,
+            "PNG",
+            margin + 6,
+            y + 6,
+            42,
+            18
+          );
+        } catch (logoError) {
+          console.warn(
+            "No se pudo cargar el logo en el PDF:",
+            logoError
+          );
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(18);
+          doc.setTextColor(...colors.green);
+          doc.text(
+            "SAMINATURA",
+            margin + 6,
+            y + 16
+          );
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(...colors.greenDark);
+        doc.text(
+          "RESUMEN DE PEDIDO",
+          pageWidth - margin - 6,
+          y + 13,
+          { align: "right" }
+        );
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...colors.muted);
+        doc.text(
+          "Gracias por confiar en nosotros",
+          pageWidth - margin - 6,
+          y + 20,
+          { align: "right" }
+        );
+
+        y += 43;
+
+        /* PEDIDO Y ESTADOS */
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.setTextColor(...colors.greenDark);
+        doc.text(
+          `Pedido ${order.name}`,
+          margin,
+          y
+        );
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...colors.muted);
+        doc.text(
+          `Fecha: ${formatDate(order.processedAt)}`,
+          margin,
+          y + 6
+        );
+
+        const paymentText =
+          financialStatusLabel(
+            order.financialStatus
+          ).toUpperCase();
+
+        const shippingText =
+          fulfillmentStatusLabel(
+            order.fulfillmentStatus
+          ).toUpperCase();
+
+        const drawBadge = (
+          text: string,
+          rightX: number,
+          fill: [number, number, number],
+          textColor: [number, number, number]
+        ) => {
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7.5);
+          const width =
+            doc.getTextWidth(text) + 9;
+          doc.setFillColor(...fill);
+          doc.roundedRect(
+            rightX - width,
+            y - 6,
+            width,
+            9,
+            4,
+            4,
+            "F"
+          );
+          doc.setTextColor(...textColor);
+          doc.text(
+            text,
+            rightX - width / 2,
+            y,
+            { align: "center" }
+          );
+          return rightX - width - 4;
+        };
+
+        let badgeRight =
+          pageWidth - margin;
+
+        badgeRight = drawBadge(
+          shippingText,
+          badgeRight,
+          [243, 246, 239],
+          [70, 92, 58]
+        );
+
+        drawBadge(
+          paymentText,
+          badgeRight,
+          order.cancelledAt
+            ? [254, 235, 235]
+            : [232, 242, 226],
+          order.cancelledAt
+            ? [166, 55, 55]
+            : [70, 102, 58]
+        );
+
+        y += 17;
+
+        /* CLIENTE Y ENTREGA */
+        const cardGap = 5;
+        const cardWidth =
+          (contentWidth - cardGap) / 2;
+        const cardHeight = 48;
+
+        doc.setFillColor(...colors.greenSoft);
+        doc.roundedRect(
+          margin,
+          y,
+          cardWidth,
+          cardHeight,
+          3,
+          3,
+          "F"
+        );
+        doc.roundedRect(
+          margin + cardWidth + cardGap,
+          y,
+          cardWidth,
+          cardHeight,
+          3,
+          3,
+          "F"
+        );
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        doc.setTextColor(...colors.greenDark);
+        doc.text(
+          "DATOS DEL CLIENTE",
+          margin + 5,
+          y + 8
+        );
+        doc.text(
+          "ENTREGA",
+          margin + cardWidth + cardGap + 5,
+          y + 8
+        );
+
+        const customerName = [
+          customer?.firstName,
+          customer?.lastName,
+        ]
+          .filter(Boolean)
+          .join(" ") || "—";
+
+        const customerEmail =
+          customer?.emailAddress?.emailAddress ??
+          "—";
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...colors.text);
+
+        [
+          customerName,
+          customerEmail,
+          `Compra: ${formatDate(order.processedAt)}`,
+          `Pago: ${financialStatusLabel(order.financialStatus)}`,
+        ].forEach((line, index) => {
+          const safeLines =
+            doc.splitTextToSize(
+              String(line),
+              cardWidth - 10
+            );
+          doc.text(
+            safeLines,
+            margin + 5,
+            y + 16 + index * 7
+          );
+        });
+
+        const shippingX =
+          margin + cardWidth + cardGap + 5;
+        const address =
+          order.shippingAddress;
+
+        const addressText = address
+          ? [
+              [address.firstName, address.lastName]
+                .filter(Boolean)
+                .join(" "),
+              address.company,
+              address.address1,
+              address.address2,
+              [address.zip, address.city]
+                .filter(Boolean)
+                .join(" "),
+              [address.province, address.country]
+                .filter(Boolean)
+                .join(", "),
+            ]
+              .filter(Boolean)
+              .join(", ")
+          : "Sin dirección de envío registrada";
+
+        doc.text(
+          `Estado: ${fulfillmentStatusLabel(
+            order.fulfillmentStatus
+          )}`,
+          shippingX,
+          y + 16
+        );
+        doc.text(
+          doc.splitTextToSize(
+            addressText,
+            cardWidth - 10
+          ),
+          shippingX,
+          y + 24
+        );
+
+        y += cardHeight + 10;
+
+        /* TABLA DE ARTÍCULOS */
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(...colors.greenDark);
+        doc.text("ARTÍCULOS", margin, y);
+        y += 6;
+
+        doc.setFillColor(...colors.green);
+        doc.roundedRect(
+          margin,
+          y,
+          contentWidth,
+          10,
+          2,
+          2,
+          "F"
+        );
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(...colors.white);
+        doc.text("PRODUCTO", margin + 4, y + 6.5);
+        doc.text("UDS.", 132, y + 6.5, {
+          align: "center",
+        });
+        doc.text("PRECIO", 159, y + 6.5, {
+          align: "right",
+        });
+        doc.text(
+          "TOTAL",
+          pageWidth - margin - 4,
+          y + 6.5,
+          { align: "right" }
+        );
+
+        y += 15;
+
+        order.lineItems.nodes.forEach(
+          (item, index) => {
+            const quantity =
+              Math.max(1, Number(item.quantity) || 1);
+            const rowTotal =
+              Number(item.totalPrice.amount) || 0;
+            const unitPrice =
+              rowTotal / quantity;
+            const currency =
+              item.totalPrice.currencyCode;
+            const productLines =
+              doc.splitTextToSize(
+                item.name || "Producto",
+                82
+              );
+            const variantLines =
+              item.variantTitle
+                ? doc.splitTextToSize(
+                    item.variantTitle,
+                    82
+                  )
+                : [];
+            const rowHeight =
+              Math.max(
+                13,
+                (productLines.length +
+                  variantLines.length) *
+                  4.5 +
+                  5
+              );
+
+            ensureSpace(rowHeight + 4);
+
+            if (index % 2 === 0) {
+              doc.setFillColor(...colors.cream);
+              doc.roundedRect(
+                margin,
+                y - 4,
+                contentWidth,
+                rowHeight,
+                1.5,
+                1.5,
+                "F"
+              );
+            }
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.8);
+            doc.setTextColor(...colors.text);
+            doc.text(
+              productLines,
+              margin + 4,
+              y + 2
+            );
+
+            if (variantLines.length > 0) {
+              doc.setFontSize(7.5);
+              doc.setTextColor(...colors.muted);
+              doc.text(
+                variantLines,
+                margin + 4,
+                y + 2 + productLines.length * 4.5
+              );
+            }
+
+            const formatItemMoney =
+              (amount: number) =>
+                formatCurrencyAmount(
+                  amount,
+                  currency
+                );
+
+            doc.setFontSize(8.8);
+            doc.setTextColor(...colors.muted);
+            doc.text(
+              String(quantity),
+              132,
+              y + 2,
+              { align: "center" }
+            );
+            doc.text(
+              formatItemMoney(unitPrice),
+              159,
+              y + 2,
+              { align: "right" }
+            );
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...colors.greenDark);
+            doc.text(
+              formatItemMoney(rowTotal),
+              pageWidth - margin - 4,
+              y + 2,
+              { align: "right" }
+            );
+
+            y += rowHeight;
+          }
+        );
+
+        y += 5;
+
+        /* TOTALES */
+        ensureSpace(58);
+        const totalsWidth = 82;
+        const totalsX =
+          pageWidth - margin - totalsWidth;
+        const refunded =
+          Number(order.totalRefunded.amount) || 0;
+        const hasRefund =
+          refunded > 0;
+        const totalsHeight =
+          hasRefund ? 53 : 45;
+
+        doc.setFillColor(...colors.greenSoft);
+        doc.roundedRect(
+          totalsX,
+          y,
+          totalsWidth,
+          totalsHeight,
+          3,
+          3,
+          "F"
+        );
+
+        const drawTotalRow = (
+          label: string,
+          value: string,
+          rowY: number
+        ) => {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(...colors.muted);
+          doc.text(label, totalsX + 6, rowY);
+          doc.text(
+            value,
+            pageWidth - margin - 6,
+            rowY,
+            { align: "right" }
+          );
+        };
+
+        drawTotalRow(
+          "Subtotal",
+          formatMoney(order.subtotal),
+          y + 9
+        );
+        drawTotalRow(
+          "Envío",
+          formatMoney(order.totalShipping),
+          y + 17
+        );
+        drawTotalRow(
+          "Impuestos",
+          formatMoney(order.totalTax),
+          y + 25
+        );
+
+        let separatorY = y + 31;
+        if (hasRefund) {
+          drawTotalRow(
+            "Reembolsado",
+            `− ${formatMoney(order.totalRefunded)}`,
+            y + 33
+          );
+          separatorY = y + 39;
+        }
+
+        doc.setDrawColor(...colors.border);
+        doc.line(
+          totalsX + 6,
+          separatorY,
+          pageWidth - margin - 6,
+          separatorY
+        );
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(...colors.greenDark);
+        doc.text(
+          "TOTAL",
+          totalsX + 6,
+          separatorY + 9
+        );
+        doc.text(
+          formatMoney(order.totalPrice),
+          pageWidth - margin - 6,
+          separatorY + 9,
+          { align: "right" }
+        );
+
+        y += totalsHeight + 10;
+
+        /* AYUDA Y AVISO */
+        ensureSpace(39);
+        doc.setFillColor(...colors.cream);
+        doc.roundedRect(
+          margin,
+          y,
+          contentWidth,
+          32,
+          3,
+          3,
+          "F"
+        );
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        doc.setTextColor(...colors.greenDark);
+        doc.text(
+          "¿NECESITAS AYUDA CON TU PEDIDO?",
+          margin + 5,
+          y + 8
+        );
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(...colors.muted);
+        doc.text(
+          "Email: saminatura369@gmail.com · WhatsApp: +34 631 415 075",
+          margin + 5,
+          y + 15
+        );
+        doc.text(
+          doc.splitTextToSize(
+            "Este documento es un resumen informativo del pedido y no sustituye a una factura. Consulta en nuestra web las condiciones de compra, devoluciones y privacidad.",
+            contentWidth - 10
+          ),
+          margin + 5,
+          y + 22
+        );
+
+        addFooter();
+
+        const safeOrderName =
+          order.name
+            .replace(/[^a-zA-Z0-9_-]/g, "") ||
+          "pedido";
+
+        doc.save(
+          `pedido-saminatura-${safeOrderName}.pdf`
+        );
+      } catch (pdfError) {
+        console.error(
+          "Error generando PDF del pedido:",
+          pdfError
+        );
+
+        setError(
+          "No se pudo generar el PDF del pedido. Inténtalo de nuevo."
+        );
+      }
+    };
 
   /* ============================================================
      CARGAR CLIENTE
@@ -418,35 +1170,81 @@ export default function ShopifyProfilePage() {
         */
 
         try {
-          const welcomeKey =
-            `saminatura_shopify_welcome_${result.id}`;
+  const justCompletedLogin =
+    sessionStorage.getItem(
+      "shopify_login_just_completed"
+    ) === "1";
 
-          const alreadyWelcomed =
-            localStorage.getItem(
-              welcomeKey
-            ) === "1";
+  if (justCompletedLogin) {
+    sessionStorage.removeItem(
+      "shopify_login_just_completed"
+    );
 
-          if (!alreadyWelcomed) {
-            /*
-              Marcamos primero y después abrimos.
-              Así cerrar sesión NO vuelve a activar el popup.
-            */
-            localStorage.setItem(
-              welcomeKey,
-              "1"
-            );
+    const createdAt =
+      new Date(
+        result.creationDate
+      ).getTime();
 
-            setWelcomeOpen(
-              true
-            );
-          }
-        } catch {
-          /*
-            Si localStorage estuviera bloqueado,
-            simplemente no rompemos el perfil.
-          */
+    const accountAgeMs =
+      Date.now() - createdAt;
+
+    const isNewAccount =
+      Number.isFinite(
+        createdAt
+      ) &&
+      accountAgeMs >= 0 &&
+      accountAgeMs <=
+        10 * 60 * 1000;
+
+    const hasFirstName =
+      Boolean(
+        result.firstName?.trim()
+      );
+
+    const hasLastName =
+      Boolean(
+        result.lastName?.trim()
+      );
+
+    const hasCompleteName =
+      hasFirstName &&
+      hasLastName;
+
+    if (isNewAccount) {
+      setWelcomeType(
+        "new"
+      );
+
+      setWelcomeOpen(
+        true
+      );
+    } else if (
+      !hasCompleteName
+    ) {
+      setWelcomeType(
+        "incomplete"
+      );
+
+      setWelcomeOpen(
+        true
+      );
+    } else {
+      navigate(
+        "/tienda",
+        {
+          replace: true,
         }
+      );
 
+      return;
+    }
+  }
+} catch (welcomeError) {
+  console.error(
+    "Error comprobando bienvenida:",
+    welcomeError
+  );
+}
         setFirstName(
           result.firstName ??
             ""
@@ -481,7 +1279,7 @@ export default function ShopifyProfilePage() {
 
     if (!loggedIn) {
       navigate(
-        "/usuario-shopify-test",
+        "/usuario",
         {
           replace:
             true,
@@ -1133,7 +1931,7 @@ export default function ShopifyProfilePage() {
                     type="button"
                     onClick={() =>
                       navigate(
-                        "/shopping-shopify-test"
+                        "/tienda"
                       )
                     }
                     className="mt-5 rounded-full bg-[#425530] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#344526]"
@@ -1169,6 +1967,16 @@ export default function ShopifyProfilePage() {
                                 : order.id
                           )
                         }
+                        onOpenStatus={() =>
+                          setSelectedOrder(
+                            order
+                          )
+                        }
+                        onDownload={() => {
+                          void downloadOrderPdf(
+                            order
+                          );
+                        }}
                       />
                     )
                   )}
@@ -1179,6 +1987,22 @@ export default function ShopifyProfilePage() {
       </section>
 
       <Footer />
+
+      {selectedOrder && (
+        <OrderStatusModal
+          order={selectedOrder}
+          onClose={() =>
+            setSelectedOrder(
+              null
+            )
+          }
+          onDownload={() => {
+            void downloadOrderPdf(
+              selectedOrder
+            );
+          }}
+        />
+      )}
 
       {/* ================================================= */}
       {/* POPUP BIENVENIDA */}
@@ -1207,19 +2031,24 @@ export default function ShopifyProfilePage() {
             </div>
 
             <p className="mt-5 text-center text-xs font-semibold uppercase tracking-[0.24em] text-[#788767]">
-              Bienvenida a Saminatura
+              {welcomeType === "new"
+                ? "Bienvenida a Saminatura"
+                : "Bienvenido/a de vuelta"}
             </p>
 
             <h2
               id="shopify-welcome-title"
               className="mt-2 text-center text-2xl font-semibold text-[#26341f]"
             >
-              Tu cuenta está lista
+              {welcomeType === "new"
+                ? "Tu cuenta está lista"
+                : "¿Quieres terminar de configurar tu cuenta?"}
             </h2>
 
             <p className="mt-3 text-center text-sm leading-6 text-gray-600">
-              Puedes completar tus datos y guardar una dirección,
-              o empezar a comprar ahora.
+              {welcomeType === "new"
+                ? "Puedes completar tu nombre y apellidos, o empezar a comprar ahora."
+                : "Aún faltan tu nombre o tus apellidos. Puedes completarlos ahora o seguir comprando."}
             </p>
 
             <button
@@ -1262,7 +2091,7 @@ export default function ShopifyProfilePage() {
                 );
 
                 navigate(
-                  "/shopping-shopify-test"
+                  "/tienda"
                 );
               }}
               className="mt-3 w-full rounded-full border border-[#b9c6aa] bg-white px-5 py-3 font-semibold text-[#425530] transition hover:bg-[#f5f7f0]"
@@ -1821,10 +2650,14 @@ function OrderCard({
   order,
   expanded,
   onToggle,
+  onOpenStatus,
+  onDownload,
 }: {
   order: ShopifyCustomerOrder;
   expanded: boolean;
   onToggle: () => void;
+  onOpenStatus: () => void;
+  onDownload: () => void;
 }) {
   const paymentLabel =
     financialStatusLabel(
@@ -1915,18 +2748,25 @@ function OrderCard({
               : "Ver pedido"}
           </button>
 
-          {order.statusPageUrl && (
-            <a
-              href={
-                order.statusPageUrl
-              }
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full bg-[#425530] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#344526]"
-            >
-              Estado del pedido
-            </a>
-          )}
+          <button
+            type="button"
+            onClick={
+              onOpenStatus
+            }
+            className="rounded-full bg-[#425530] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#344526]"
+          >
+            Estado del pedido
+          </button>
+
+          <button
+            type="button"
+            onClick={
+              onDownload
+            }
+            className="rounded-full border border-[#425530]/25 bg-white px-5 py-2.5 text-sm font-semibold text-[#425530] transition hover:bg-[#f2f6ed]"
+          >
+            Descargar resumen PDF
+          </button>
         </div>
       </div>
 
@@ -2200,6 +3040,246 @@ function OrderCard({
         </div>
       )}
     </article>
+  );
+}
+
+/* ============================================================
+   MODAL ESTADO DEL PEDIDO
+   ============================================================ */
+
+function OrderStatusModal({
+  order,
+  onClose,
+  onDownload,
+}: {
+  order: ShopifyCustomerOrder;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  const paymentLabel =
+    financialStatusLabel(
+      order.financialStatus
+    );
+
+  const shippingLabel =
+    fulfillmentStatusLabel(
+      order.fulfillmentStatus
+    );
+
+  const productCount =
+    order.lineItems.nodes.reduce(
+      (
+        total,
+        item
+      ) =>
+        total +
+        item.quantity,
+      0
+    );
+
+  return (
+    <div
+      className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-[3px]"
+      onMouseDown={(event) => {
+        if (
+          event.target ===
+          event.currentTarget
+        ) {
+          onClose();
+        }
+      }}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="order-status-title"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[30px] border border-[#d5ddca] bg-white shadow-2xl"
+        onMouseDown={(event) =>
+          event.stopPropagation()
+        }
+      >
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#e2e7dc] bg-white px-6 py-5 md:px-8">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#788767]">
+              Seguimiento
+            </p>
+
+            <h2
+              id="order-status-title"
+              className="mt-2 text-2xl font-semibold text-[#26341f]"
+            >
+              {order.name}
+            </h2>
+
+            <p className="mt-1 text-sm text-gray-500">
+              Realizado el{" "}
+              {formatDate(
+                order.processedAt
+              )}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar estado del pedido"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-[#fafbf7] text-xl text-gray-600 transition hover:bg-gray-100"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="p-6 md:p-8">
+          {order.cancelledAt ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+              <p className="font-semibold text-red-800">
+                Pedido cancelado
+              </p>
+
+              <p className="mt-1 text-sm text-red-700">
+                Cancelado el{" "}
+                {formatDate(
+                  order.cancelledAt
+                )}
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[#cfdcc3] bg-[#f3f8ee] p-5">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#425530] text-xl text-white">
+                  ✓
+                </div>
+
+                <div>
+                  <p className="font-semibold text-[#26341f]">
+                    {shippingLabel}
+                  </p>
+
+                  <p className="mt-1 text-sm leading-6 text-[#66715d]">
+                    Aquí puedes consultar el estado actual sin salir de Saminatura.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <StatusBox
+              label="Pago"
+              value={paymentLabel}
+            />
+
+            <StatusBox
+              label="Envío"
+              value={shippingLabel}
+            />
+
+            <StatusBox
+              label="Productos"
+              value={`${productCount}`}
+            />
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-gray-200 bg-[#fafbf7] p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+              Resumen
+            </p>
+
+            <div className="mt-4 space-y-3 text-sm">
+              {order.lineItems.nodes.map(
+                (item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-start justify-between gap-4 border-b border-gray-200 pb-3 last:border-0 last:pb-0"
+                  >
+                    <div>
+                      <p className="font-semibold text-gray-900">
+                        {item.name}
+                      </p>
+
+                      <p className="mt-1 text-xs text-gray-500">
+                        Cantidad:{" "}
+                        {item.quantity}
+                      </p>
+                    </div>
+
+                    <p className="shrink-0 font-semibold text-gray-900">
+                      {formatMoney(
+                        item.totalPrice
+                      )}
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+
+            <div className="mt-5 border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between gap-4">
+                <span className="font-semibold text-gray-900">
+                  Total
+                </span>
+
+                <span className="text-xl font-bold text-[#26341f]">
+                  {formatMoney(
+                    order.totalPrice
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={onDownload}
+              className="flex-1 rounded-full bg-[#425530] px-5 py-3 font-semibold text-white transition hover:bg-[#344526]"
+            >
+              Descargar resumen PDF
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-full border border-[#aebc8f] bg-white px-5 py-3 font-semibold text-[#425530] transition hover:bg-[#f2f5ea]"
+            >
+              Volver a mi perfil
+            </button>
+          </div>
+
+          {order.statusPageUrl && (
+            <a
+              href={order.statusPageUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 block text-center text-xs text-gray-400 underline decoration-gray-300 underline-offset-4 transition hover:text-gray-600"
+            >
+              Consultar también la página oficial de Shopify ↗
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#dde4d5] bg-white p-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+        {label}
+      </p>
+
+      <p className="mt-2 font-semibold text-[#34452a]">
+        {value}
+      </p>
+    </div>
   );
 }
 

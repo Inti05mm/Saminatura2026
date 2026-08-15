@@ -19,6 +19,15 @@ import {
   type ShopifyDetailVariant,
 } from "../../shopifyProductDetail";
 
+import ShopifyRelatedProducts
+  from "../containers/ShopifyRelatedProducts";
+
+import ShopifyRelatedBrand
+  from "../containers/ShopifyRelatedBrand";
+
+import ShopifyFavoriteButton
+  from "../containers/ShopifyFavoriteButton";
+
 type ExtraInfo = {
   ingredients: string | null;
   nutritionalInfo: string | null;
@@ -345,7 +354,7 @@ export default function ShopifyProductDetailPage() {
             type="button"
             onClick={() =>
               navigate(
-                "/shopping-shopify-test"
+                "/tienda"
               )
             }
             className="rounded-full bg-black px-5 py-2 text-white"
@@ -513,34 +522,66 @@ export default function ShopifyProductDetailPage() {
               </div>
             )}
 
-            {/* CARRITO */}
-            <button
-              type="button"
-              onClick={() => {
-                void addCurrentVariant();
-              }}
-              disabled={
-                outOfStock ||
-                cartLoading
-              }
-              className={[
-                "mt-6 w-full rounded-full px-5 py-4 font-semibold transition",
+            {/* ACCIONES */}
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={() => {
+                  void addCurrentVariant();
+                }}
+                disabled={
+                  outOfStock ||
+                  cartLoading
+                }
+                className={[
+                  "h-14 flex-1 rounded-full px-6 font-semibold transition",
 
-                outOfStock
-                  ? "cursor-not-allowed bg-gray-200 text-gray-500"
-                  : "bg-gray-950 text-white hover:bg-gray-800",
+                  outOfStock
+                    ? "cursor-not-allowed bg-gray-200 text-gray-500"
+                    : "bg-gray-950 text-white hover:bg-gray-800",
 
-                cartLoading
-                  ? "opacity-60"
-                  : "",
-              ].join(" ")}
-            >
-              {outOfStock
-                ? "Fuera de stock"
-                : added
-                ? "¡Añadido!"
-                : "Añadir a la cesta"}
-            </button>
+                  cartLoading
+                    ? "opacity-60"
+                    : "",
+                ].join(" ")}
+              >
+                {outOfStock
+                  ? "Fuera de stock"
+                  : added
+                  ? "¡Añadido!"
+                  : "Añadir a la cesta"}
+              </button>
+
+              <div className="flex gap-3">
+                <ShopifyFavoriteButton
+                  variantId={
+                    selectedVariant.id
+                  }
+                  productName={
+                    product.title
+                  }
+                  className="h-14 w-14 shrink-0"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.history.length > 1
+                    ) {
+                      navigate(-1);
+                    } else {
+                      navigate(
+                        "/tienda"
+                      );
+                    }
+                  }}
+                  className="h-14 shrink-0 rounded-full border border-gray-300 bg-white px-5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50"
+                >
+                  Volver atrás
+                </button>
+              </div>
+            </div>
 
             {/* INFO */}
             <div className="mt-8">
@@ -557,6 +598,16 @@ export default function ShopifyProductDetailPage() {
           </div>
         </div>
       </section>
+
+      <ShopifyRelatedProducts
+  category={product.productType}
+  currentProductId={product.id}
+/>
+
+<ShopifyRelatedBrand
+  brand={product.vendor}
+  currentProductId={product.id}
+/>
 
       <Footer />
     </main>

@@ -1,17 +1,30 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../supabaseClient";
+
+import {
+  getAllShopifyProducts,
+} from "../../shopifyCatalog";
 
 type ProductSlide = {
-  id: number;
-  slug: string | null;
+  id: string;
+  numeric_id: string | null;
+  handle: string | null;
   name: string;
   brand: string;
   price: number;
   img: string | null;
-  published_at: string;
-  stock: number | null;
+  created_at: string | null;
+  stock: number;
 };
+
+type NewProductsResponse = {
+  ok: boolean;
+  products: ProductSlide[];
+  total: number;
+  error?: string;
+};
+
+const SHOPIFY_API_BASE = "/api";
 
 const formatEUR = (value: number) =>
   new Intl.NumberFormat("es-ES", {
@@ -57,7 +70,7 @@ const Carousel: React.FC = () => {
   }, []);
 
   // ============================================================
-  // CARGAR NOVEDADES
+  // CARGAR NOVEDADES DESDE SHOPIFY
   // ============================================================
 
   useEffect(() => {
@@ -67,56 +80,113 @@ const Carousel: React.FC = () => {
       setLoading(true);
 
       try {
-        const { data, error } = await supabase
-          .from("public_products")
-          .select(
-            "id, slug, name, brand, price, img, published_at, stock"
-          )
-          .not("published_at", "is", null)
-          .gt("stock", 0)
-          .order("published_at", { ascending: false })
-          .limit(12);
+        const response = await fetch(
+          `${SHOPIFY_API_BASE}/shopify/storefront/new-products?limit=12`,
+          {
+            headers: {
+              Accept: "application/json",
+            },
+          }
+        );
+
+        const data =
+          (await response.json()) as NewProductsResponse;
 
         if (!alive) return;
 
-        if (error) {
-          throw error;
+        if (!response.ok || data.ok === false) {
+          throw new Error(
+            data.error ||
+              `Error cargando novedades (${response.status})`
+          );
         }
 
-        const products: ProductSlide[] = (data ?? []).map(
-          (product: any) => ({
-            id: Number(product.id),
+        const newProducts =
+          Array.isArray(data.products)
+            ? data.products
+            : [];
 
-            slug:
-              product.slug === null || product.slug === undefined
-                ? null
-                : String(product.slug),
+        const catalogProducts =
+          await getAllShopifyProducts();
 
-            name: String(product.name ?? ""),
+        if (!alive) return;
 
-            brand: String(product.brand ?? ""),
+        const handleById =
+          new Map<string, string>();
 
-            price: Number(product.price ?? 0),
+        catalogProducts.forEach(
+          (product) => {
+            const id =
+              String(product.id);
 
-            img:
-              product.img === null || product.img === undefined
-                ? null
-                : String(product.img),
+            const numericId =
+              id.split("/").pop() ??
+              "";
 
-            published_at: String(product.published_at ?? ""),
+            handleById.set(
+              id,
+              product.handle
+            );
 
-            stock:
-              product.stock === null || product.stock === undefined
-                ? null
-                : Number(product.stock),
-          })
+            if (numericId) {
+              handleById.set(
+                numericId,
+                product.handle
+              );
+            }
+          }
         );
 
-        setSlidesData(products);
+        const normalizedProducts =
+          newProducts
+            .map((product) => {
+              const productId =
+                String(
+                  product.id ?? ""
+                );
+
+              const numericId =
+                String(
+                  product.numeric_id ??
+                    productId
+                      .split("/")
+                      .pop() ??
+                    ""
+                );
+
+              const handle =
+                product.handle?.trim() ||
+                handleById.get(
+                  productId
+                ) ||
+                handleById.get(
+                  numericId
+                ) ||
+                null;
+
+              return {
+                ...product,
+                handle,
+              };
+            })
+            .filter(
+              (product) =>
+                Boolean(
+                  product.handle
+                )
+            );
+
+        setSlidesData(
+          normalizedProducts
+        );
       } catch (error) {
         if (!alive) return;
 
-        console.error("Error cargando novedades:", error);
+        console.error(
+          "Error cargando novedades de Shopify:",
+          error
+        );
+
         setSlidesData([]);
       } finally {
         if (alive) {
@@ -189,14 +259,18 @@ const Carousel: React.FC = () => {
   // ============================================================
 
   const openProduct = (product: ProductSlide) => {
-    const slug = (product.slug ?? "").trim();
+    if (!product.handle) {
+      console.warn(
+        "No se encontró el handle Shopify del producto:",
+        product
+      );
 
-    if (slug) {
-      navigate(`/tienda/${slug}-${product.id}`);
       return;
     }
 
-    navigate(`/tienda/${product.id}`);
+    navigate(
+      `/tienda/${product.handle}`
+    );
   };
 
   return (

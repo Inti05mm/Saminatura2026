@@ -9,57 +9,128 @@ import {
 } from "react-router-dom";
 
 import {
-  useContext,
   useEffect,
 } from "react";
 
+/* ============================================================
+   SUPABASE LEGACY
+
+   Los mantenemos temporalmente porque todavía puedes tener
+   páginas antiguas que usan estos contextos.
+
+   IMPORTANTE:
+   ya NO bloqueamos toda la aplicación esperando
+   UserContext.initializing.
+   ============================================================ */
+
 import {
-  UserContext,
   UserProvider,
 } from "./assets/containers/UserContext";
 
-import { CartProvider } from "./assets/containers/CartContext";
-import { FavoritesProvider } from "./assets/containers/FavoritesContext";
+import {
+  CartProvider,
+} from "./assets/containers/CartContext";
+
+/* ============================================================
+   SHOPIFY CONTEXTS
+   ============================================================ */
+
+import {
+  ShopifyCartProvider,
+} from "./assets/containers/ShopifyCartContext";
+
+import {
+  ShopifyCustomerProvider,
+} from "./assets/containers/ShopifyCustomerContext";
+
+import {
+  ShopifyFavoritesProvider,
+} from "./assets/containers/ShopifyFavoritesContext";
+
+/* ============================================================
+   GENERAL
+   ============================================================ */
 
 import Header from "./assets/containers/Header";
 import Footer from "./assets/containers/Footer";
 
-import HomePage from "./assets/pages/HomePage";
+/* ============================================================
+   SHOPIFY - PÁGINAS PRINCIPALES
+   ============================================================ */
+
+import HomePage from "./assets/pages/ShopifyHomePage";
+
+import ShopifyShopPage from "./assets/pages/ShopifyShopPage";
+
+import ShopifyProductDetailPage from "./assets/pages/ShopifyProductDetailPage";
+
+import ShopifyCartPage from "./assets/pages/ShopifyCartPage";
+
+import ShopifyUserPage from "./assets/pages/ShopifyUserPage";
+
+import ShopifyCustomerCallbackPage from "./assets/pages/ShopifyCustomerCallbackPage";
+
+import ShopifyProfilePage from "./assets/pages/ShopifyProfilePage";
+
+import ShopifyFavoritesPage from "./assets/pages/ShopifyFavoritesPage";
+
+/* ============================================================
+   TIENDA FÍSICA / COMUNIDAD
+   ============================================================ */
+
 import TiendaPage from "./assets/pages/TiendaPage";
+
 import ComunidadPage from "./assets/pages/ComunidadPage";
-import UserPage from "./assets/pages/UserPage";
-import ProdDetPage from "./assets/pages/ProdDetailPage";
-import ShopPage from "./assets/pages/ShopPage";
+
+/* ============================================================
+   SHOPIFY ADMIN
+   ============================================================ */
+
+import ShopifyAdminPage from "./assets/pages/ShopifyAdminPage";
+
+import ShopifyEditProductsPage from "./assets/pages/ShopifyEditProductsPage";
+
+import ShopifyAdminLoginPage from "./assets/pages/ShopifyAdminLoginPage";
+
+import ShopifyAdminRoute from "./assets/containers/ShopifyAdminRoute";
+
+/* ============================================================
+   LEGACY / SUPABASE
+   ============================================================ */
+
+
 import EditProductsPage from "./assets/pages/EditProductsPage";
-import CartPage from "./assets/pages/CartPage";
-import CheckoutSuccessPage from "./assets/pages/CheckoutSuccessPage";
+
 import AdminOrdersPage from "./assets/pages/AdminOrderPage";
-import PerfilPage from "./assets/pages/PerfilPage";
+
+import CheckoutSuccessPage from "./assets/pages/CheckoutSuccessPage";
+
 import ResetPasswordPage from "./assets/pages/ResetPasswordPage";
-import FavoritesPage from "./assets/pages/FavoritesPage";
+
+/* ============================================================
+   LEGALES
+   ============================================================ */
 
 import EnviosDevolucionesPage from "./assets/pages/EnviosDevolucionesPage";
-import CondicionesCompraPage from "./assets/pages/CondicionesCompraPage";
-import CookiesPage from "./assets/pages/CookiesPage";
-import PrivacidadPage from "./assets/pages/PrivacidadPage";
-import AvisoLegalPage from "./assets/pages/AvisoLegalPage";
-import ShopifyShopPage from "./assets/pages/ShopifyShopPage";
-import { ShopifyCartProvider } from "./assets/containers/ShopifyCartContext";
-import ShopifyCartPage from "./assets/pages/ShopifyCartPage";
-import ShopifyProductDetailPage from "./assets/pages/ShopifyProductDetailPage";
-import ShopifyUserPage from "./assets/pages/ShopifyUserPage";
-import ShopifyCustomerCallbackPage from "./assets/pages/ShopifyCustomerCallbackPage";
-import { ShopifyCustomerProvider } from "./assets/containers/ShopifyCustomerContext";
-import ShopifyProfilePage from "./assets/pages/ShopifyProfilePage";
-import ShopifyAdminOrdersManager from "./assets/containers/AdminOrdersManager";
 
-/*
-  Cada vez que cambia la ruta,
-  lleva automáticamente al usuario
-  al principio de la nueva página.
-*/
+import CondicionesCompraPage from "./assets/pages/CondicionesCompraPage";
+
+import CookiesPage from "./assets/pages/CookiesPage";
+
+import PrivacidadPage from "./assets/pages/PrivacidadPage";
+
+import AvisoLegalPage from "./assets/pages/AvisoLegalPage";
+
+
+/* ============================================================
+   SCROLL TO TOP
+   ============================================================ */
+
 function ScrollToTop() {
-  const { pathname } = useLocation();
+  const {
+    pathname,
+  } =
+    useLocation();
 
   useEffect(() => {
     window.scrollTo({
@@ -67,30 +138,23 @@ function ScrollToTop() {
       left: 0,
       behavior: "instant",
     });
-  }, [pathname]);
+  }, [
+    pathname,
+  ]);
 
   return null;
 }
 
 
-/*
-  Layout exclusivo para páginas legales.
+/* ============================================================
+   LEGAL PAGE
+   ============================================================ */
 
-  De esta forma TODAS tienen:
-
-  Header
-  ↓
-  Documento legal
-  ↓
-  Footer
-
-  sin tener que repetir Header/Footer
-  dentro de cada página.
-*/
 function LegalPage({
   children,
 }: {
-  children: React.ReactNode;
+  children:
+    React.ReactNode;
 }) {
   return (
     <div className="flex min-h-screen flex-col">
@@ -106,118 +170,215 @@ function LegalPage({
 }
 
 
-function AppRoutes() {
-  const { initializing } =
-    useContext(UserContext);
+/* ============================================================
+   ROUTES
+   ============================================================ */
 
-  if (initializing) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f1e8]">
-        <p className="text-lg text-[#66715d]">
-          Cargando aplicación…
-        </p>
-      </div>
-    );
-  }
+function AppRoutes() {
+  /*
+    IMPORTANTE:
+
+    Hemos eliminado esto:
+
+      const { initializing } = useContext(UserContext);
+
+      if (initializing) {
+        return ...
+      }
+
+    porque pertenecía a Supabase y podía bloquear
+    TODA la aplicación Shopify.
+  */
 
   return (
     <>
       <ScrollToTop />
 
       <Routes>
+        {/* ================================================= */}
+        {/* INICIO */}
+        {/* ================================================= */}
+
         <Route
           path="/"
-          element={<HomePage />}
+          element={
+            <HomePage />
+          }
         />
+
+
+        {/* ================================================= */}
+        {/* TIENDA SHOPIFY */}
+        {/* ================================================= */}
 
         <Route
           path="/tienda"
-          element={<TiendaPage />}
+          element={
+            <ShopifyShopPage />
+          }
         />
 
         <Route
-  path="/micesta-shopify-test"
-  element={<ShopifyCartPage />}
-/>
-
-        <Route
-          path="/comunidad"
-          element={<ComunidadPage />}
+          path="/tienda/:handle"
+          element={
+            <ShopifyProductDetailPage />
+          }
         />
 
+
+        {/* ================================================= */}
+        {/* TIENDA FÍSICA */}
+        {/* ================================================= */}
+
         <Route
-          path="/usuario"
-          element={<UserPage />}
+          path="/Nuestratienda"
+          element={
+            <TiendaPage />
+          }
         />
 
-        <Route
-          path="/shopping/:slug"
-          element={<ProdDetPage />}
-        />
-        <Route
-  path="/admin/pedidos-shopify"
-  element={<ShopifyAdminOrdersManager />}
-/>
 
-        <Route
-          path="/shopping"
-          element={<ShopPage />}
-        />
-
-        <Route
-  path="/perfil-shopify-test"
-  element={<ShopifyProfilePage />}
-/>
-
-        <Route
-          path="/modificarproductos"
-          element={<EditProductsPage />}
-        />
-
-        <Route
-  path="/shopping-shopify-test/:handle"
-  element={<ShopifyProductDetailPage />}
-/>
-
-<Route
-  path="/usuario-shopify-test"
-  element={<ShopifyUserPage />}
-/>
-
-<Route
-  path="/auth/shopify/callback"
-  element={<ShopifyCustomerCallbackPage />}
-/>
-
-        <Route
-  path="/shopping-shopify-test"
-  element={<ShopifyShopPage />}
-/>
+        {/* ================================================= */}
+        {/* CESTA SHOPIFY */}
+        {/* ================================================= */}
 
         <Route
           path="/micesta"
-          element={<CartPage />}
+          element={
+            <ShopifyCartPage />
+          }
         />
+
+
+        {/* ================================================= */}
+        {/* USUARIO SHOPIFY */}
+        {/* ================================================= */}
+
+        <Route
+          path="/usuario"
+          element={
+            <ShopifyUserPage />
+          }
+        />
+
+
+        {/* ================================================= */}
+        {/* PERFIL SHOPIFY */}
+        {/* ================================================= */}
+
+        <Route
+          path="/perfil"
+          element={
+            <ShopifyProfilePage />
+          }
+        />
+
+
+        {/* ================================================= */}
+        {/* FAVORITOS SHOPIFY */}
+        {/* ================================================= */}
 
         <Route
           path="/favoritos"
-          element={<FavoritesPage />}
+          element={
+            <ShopifyFavoritesPage />
+          }
+        />
+
+
+        {/* ================================================= */}
+        {/* CALLBACK CUSTOMER ACCOUNT API
+
+            NO CAMBIAR ESTA RUTA.
+            Es la registrada en Shopify/ngrok.
+        */}
+        {/* ================================================= */}
+
+        <Route
+          path="/auth/shopify/callback"
+          element={
+            <ShopifyCustomerCallbackPage />
+          }
+        />
+
+
+        {/* ================================================= */}
+        {/* ADMIN SHOPIFY LOGIN */}
+        {/* ================================================= */}
+
+        <Route
+          path="/admin/login"
+          element={
+            <ShopifyAdminLoginPage />
+          }
+        />
+
+
+        {/* ================================================= */}
+        {/* ADMIN SHOPIFY */}
+        {/* ================================================= */}
+
+        <Route
+          path="/admin/shopify"
+          element={
+            <ShopifyAdminRoute>
+              <ShopifyAdminPage />
+            </ShopifyAdminRoute>
+          }
         />
 
         <Route
-          path="/checkout/success"
-          element={<CheckoutSuccessPage />}
+          path="/admin/shopify/Productos"
+          element={
+            <ShopifyAdminRoute>
+              <ShopifyEditProductsPage />
+            </ShopifyAdminRoute>
+          }
+        />
+
+
+        {/* ================================================= */}
+        {/* COMUNIDAD */}
+        {/* ================================================= */}
+
+        <Route
+          path="/comunidad"
+          element={
+            <ComunidadPage />
+          }
+        />
+
+
+        <Route
+          path="/modificarproductos"
+          element={
+            <EditProductsPage />
+          }
         />
 
         <Route
           path="/admin/pedidos"
-          element={<AdminOrdersPage />}
+          element={
+            <AdminOrdersPage />
+          }
         />
 
+
+        {/* ================================================= */}
+        {/* CHECKOUT */}
+        {/* ================================================= */}
+
         <Route
-          path="/perfil"
-          element={<PerfilPage />}
+          path="/checkout/success"
+          element={
+            <CheckoutSuccessPage />
+          }
         />
+
+
+        {/* ================================================= */}
+        {/* PROFILE COMPATIBILITY */}
+        {/* ================================================= */}
 
         <Route
           path="/profile"
@@ -229,6 +390,11 @@ function AppRoutes() {
           }
         />
 
+
+        {/* ================================================= */}
+        {/* LOGIN COMPATIBILITY */}
+        {/* ================================================= */}
+
         <Route
           path="/login"
           element={
@@ -239,20 +405,34 @@ function AppRoutes() {
           }
         />
 
-        <Route
-  path="/shopify-test"
-  element={<ShopifyTest />}
-/>
+
+        {/* ================================================= */}
+        {/* SHOPIFY TEST */}
+        {/* ================================================= */}
 
         <Route
-          path="/reset-password"
-          element={<ResetPasswordPage />}
+          path="/shopify-test"
+          element={
+            <ShopifyTest />
+          }
         />
 
 
-        {/* ========================= */}
+        {/* ================================================= */}
+        {/* RESET PASSWORD SUPABASE LEGACY */}
+        {/* ================================================= */}
+
+        <Route
+          path="/reset-password"
+          element={
+            <ResetPasswordPage />
+          }
+        />
+
+
+        {/* ================================================= */}
         {/* PÁGINAS LEGALES */}
-        {/* ========================= */}
+        {/* ================================================= */}
 
         <Route
           path="/legal/aviso-legal"
@@ -300,7 +480,10 @@ function AppRoutes() {
         />
 
 
-        {/* Cualquier ruta desconocida */}
+        {/* ================================================= */}
+        {/* DESCONOCIDA */}
+        {/* ================================================= */}
+
         <Route
           path="*"
           element={
@@ -316,20 +499,35 @@ function AppRoutes() {
 }
 
 
+/* ============================================================
+   APP
+   ============================================================ */
+
 export default function App() {
   return (
     <Router>
+      {/*
+        SUPABASE LEGACY
+
+        Se mantienen porque todavía hay páginas antiguas que
+        podrían necesitarlos.
+
+        Pero ya NO controlan el arranque de la aplicación.
+      */}
       <UserProvider>
-  <CartProvider>
-    <ShopifyCartProvider>
-      <ShopifyCustomerProvider>
-        <FavoritesProvider>
-          <AppRoutes />
-        </FavoritesProvider>
-      </ShopifyCustomerProvider>
-    </ShopifyCartProvider>
-  </CartProvider>
-</UserProvider>
+        <CartProvider>
+
+          {/* SHOPIFY */}
+          <ShopifyCartProvider>
+            <ShopifyCustomerProvider>
+              <ShopifyFavoritesProvider>
+                <AppRoutes />
+              </ShopifyFavoritesProvider>
+            </ShopifyCustomerProvider>
+          </ShopifyCartProvider>
+
+        </CartProvider>
+      </UserProvider>
     </Router>
   );
 }

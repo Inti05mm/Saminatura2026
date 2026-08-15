@@ -4,19 +4,35 @@ import {
   useState,
 } from "react";
 
+import logoImg from "../pictures/logo_2.png";
+
 import {
   Link,
-  useNavigate,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
 
-import { supabase } from "../supabaseClient";
+import {
+  getAllShopifyProducts,
+  type ShopifyCatalogProduct,
+} from "../../shopifyCatalog";
 
-import { useUser } from "../containers/useUser";
-import { useCart } from "../containers/CartContext";
-import { useShopifyCart } from "../containers/ShopifyCartContext";
-import { useShopifyCustomer } from "../containers/ShopifyCustomerContext";
-import { useFavorites } from "../containers/FavoritesContext";
+import {
+  useShopifyCart,
+} from "../containers/ShopifyCartContext";
+
+import {
+  useShopifyCustomer,
+} from "../containers/ShopifyCustomerContext";
+
+import {
+  useShopifyFavorites,
+} from "../containers/ShopifyFavoritesContext";
+
+
+/* ============================================================
+   TYPES
+   ============================================================ */
 
 type Toast =
   | {
@@ -25,36 +41,26 @@ type Toast =
     }
   | null;
 
-function saveToastForNextPage(
-  toast: Exclude<Toast, null>
-) {
-  try {
-    sessionStorage.setItem(
-      "toast",
-      JSON.stringify(toast)
-    );
-  } catch {
-    // Sin acción.
-  }
-}
 
 type ProductSuggestion = {
-  id: number;
+  id: string;
   name: string;
-  slug: string | null;
-  flavor: string | null;
-  size: string | null;
+  handle: string;
+  variantLabel: string | null;
 };
 
+
 type SearchCatalogRow = {
-  id: number;
+  id: string;
   name: string;
-  slug: string | null;
-  flavor: string | null;
-  size: string | null;
+  handle: string;
+
+  variantLabel: string | null;
+
   category: string | null;
   brand: string | null;
 };
+
 
 type SuggestItem =
   | {
@@ -67,198 +73,496 @@ type SuggestItem =
     }
   | {
       kind: "product";
-      id: number;
+      id: string;
       name: string;
-      slug: string | null;
-      flavor: string | null;
-      size: string | null;
+      handle: string;
+      variantLabel: string | null;
     };
+
+
+/* ============================================================
+   CONFIG
+   ============================================================ */
+
+const ADMIN_API = "/api";
+
+
+const CUSTOMER_LOGIN_HREF =
+  "/usuario";
+
+const CUSTOMER_PROFILE_HREF =
+  "/perfil";
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
+function normalizeText(
+  value: string
+) {
+  return value
+    .normalize("NFD")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
+    .toLocaleLowerCase("es")
+    .trim();
+}
+
+
+function uniq(
+  values: string[]
+) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) =>
+          value.trim()
+        )
+        .filter(Boolean)
+    )
+  );
+}
+
+
+function cleanVariantTitle(
+  value:
+    | string
+    | null
+    | undefined
+) {
+  const text =
+    String(
+      value ?? ""
+    ).trim();
+
+  if (
+    !text ||
+    normalizeText(
+      text
+    ) === "default title"
+  ) {
+    return null;
+  }
+
+  return text;
+}
+
+
+function getVariantLabel(
+  product:
+    ShopifyCatalogProduct
+) {
+  const variant =
+    product.variants
+      .nodes?.[0];
+
+  if (!variant) {
+    return null;
+  }
+
+  return cleanVariantTitle(
+    variant.title
+  );
+}
+
+
+function fullProductName(
+  product: {
+    name: string;
+
+    variantLabel:
+      | string
+      | null;
+  }
+) {
+  return [
+    product.name,
+    product.variantLabel,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+
+/* ============================================================
+   HEADER
+   ============================================================ */
 
 const Header: React.FC<{
   title?: string;
 }> = ({
   title = "Saminatura",
 }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate =
+    useNavigate();
 
-  /*
-    ============================================================
-    RUTAS DE PRUEBA SHOPIFY
-    ============================================================
-  */
+  const location =
+    useLocation();
 
-  const isShopifyArea =
-    location.pathname.startsWith(
-      "/shopping-shopify-test"
-    ) ||
-    location.pathname.startsWith(
-      "/micesta-shopify-test"
-    ) ||
-    location.pathname.startsWith(
-      "/usuario-shopify-test"
-    ) ||
-    location.pathname.startsWith(
-      "/perfil-shopify-test"
-    ) ||
-    location.pathname.startsWith(
-      "/auth/shopify"
-    );
 
-  const shoppingHref = isShopifyArea
-    ? "/shopping-shopify-test"
-    : "/shopping";
-
-  const cartHref = isShopifyArea
-    ? "/micesta-shopify-test"
-    : "/micesta";
+  /* ============================================================
+     ROUTES
+     ============================================================ */
 
   const isHomePage =
     location.pathname === "/";
 
-  // ============================================================
-  // USUARIO LOCAL / SUPABASE
-  // ============================================================
+  const shoppingHref =
+    "/tienda";
+
+  const cartHref =
+    "/micesta";
+
+
+  /* ============================================================
+     SHOPIFY CUSTOMER
+     ============================================================ */
 
   const {
-    user,
-    initializing,
-  } = useUser();
+    loggedIn:
+      shopifyLoggedIn,
 
-  const [
-    profile,
-    setProfile,
-  ] = useState<any>(null);
+    loading:
+      shopifyCustomerLoading,
 
-  // ============================================================
-  // USUARIO SHOPIFY
-  // ============================================================
+    logout:
+      shopifyLogout,
+  } =
+    useShopifyCustomer();
 
-  const {
-    loggedIn: shopifyLoggedIn,
-    loading: shopifyCustomerLoading,
-    logout: shopifyLogout,
-  } = useShopifyCustomer();
 
   const [
     userMenuOpen,
     setUserMenuOpen,
-  ] = useState(false);
+  ] =
+    useState(false);
 
-  // ============================================================
-  // CARRITO ANTIGUO SUPABASE
-  // ============================================================
 
-  const {
-    cart: legacyCart,
-    loading: legacyCartLoading,
-  } = useCart();
-
-  const legacyCartItemCount =
-    legacyCart.items.reduce(
-      (total, item) =>
-        total + item.qty,
-      0
-    );
-
-  // ============================================================
-  // CARRITO SHOPIFY
-  // ============================================================
+  /* ============================================================
+     SHOPIFY CART
+     ============================================================ */
 
   const {
-    totalItems: shopifyCartItemCount,
-    loading: shopifyCartLoading,
-  } = useShopifyCart();
+    totalItems:
+      cartItemCount,
 
-  const cartItemCount =
-    isShopifyArea
-      ? shopifyCartItemCount
-      : legacyCartItemCount;
+    loading:
+      cartLoading,
+  } =
+    useShopifyCart();
 
-  const cartLoading =
-    isShopifyArea
-      ? shopifyCartLoading
-      : legacyCartLoading;
 
-  // ============================================================
-  // FAVORITOS
-  // ============================================================
+  /* ============================================================
+     SHOPIFY FAVORITES
+     ============================================================ */
 
-  /*
-    Todavía son los favoritos antiguos
-    de Supabase.
-
-    Después los migraremos.
-  */
   const {
     favoriteCount,
-  } = useFavorites();
+  } =
+    useShopifyFavorites();
 
-  // ============================================================
-  // BUSCADOR
-  // ============================================================
+
+  /* ============================================================
+     ADMIN SESSION
+     ============================================================ */
+
+  const [
+    adminLoggedIn,
+    setAdminLoggedIn,
+  ] =
+    useState(false);
+
+
+  const [
+    adminLoading,
+    setAdminLoading,
+  ] =
+    useState(true);
+
+
+  useEffect(() => {
+    let alive = true;
+
+    const checkAdmin =
+      async () => {
+        setAdminLoading(
+          true
+        );
+
+        try {
+          const response =
+            await fetch(
+              `${ADMIN_API}/admin/auth/me`,
+              {
+                credentials:
+                  "include",
+
+                headers: {
+                  Accept:
+                    "application/json",
+                },
+              }
+            );
+
+          if (!alive) {
+            return;
+          }
+
+          setAdminLoggedIn(
+            response.ok
+          );
+        } catch (
+          error
+        ) {
+          console.error(
+            "Admin session check failed:",
+            error
+          );
+
+          if (
+            alive
+          ) {
+            setAdminLoggedIn(
+              false
+            );
+          }
+        } finally {
+          if (
+            alive
+          ) {
+            setAdminLoading(
+              false
+            );
+          }
+        }
+      };
+
+    void checkAdmin();
+
+    return () => {
+      alive = false;
+    };
+  }, [
+    location.pathname,
+  ]);
+
+
+  /* ============================================================
+     ADMIN LOGOUT
+     ============================================================ */
+
+  const handleAdminLogout =
+    async () => {
+      try {
+        const response =
+          await fetch(
+            `${ADMIN_API}/admin/auth/logout`,
+            {
+              method:
+                "POST",
+
+              credentials:
+                "include",
+
+              headers: {
+                Accept:
+                  "application/json",
+              },
+            }
+          );
+
+        if (
+          !response.ok
+        ) {
+          throw new Error(
+            "No se pudo cerrar la sesión admin."
+          );
+        }
+
+        setAdminLoggedIn(
+          false
+        );
+
+        setUserMenuOpen(
+          false
+        );
+
+        navigate("/");
+
+        setToast({
+          type:
+            "success",
+
+          msg:
+            "Sesión de administración cerrada.",
+        });
+      } catch (
+        error
+      ) {
+        console.error(
+          "Admin logout failed:",
+          error
+        );
+
+        setToast({
+          type:
+            "error",
+
+          msg:
+            "No se pudo cerrar la sesión de administración.",
+        });
+      }
+    };
+
+
+  /* ============================================================
+     SHOPIFY CUSTOMER LOGOUT
+     ============================================================ */
+
+  const handleShopifyLogout =
+    async () => {
+      try {
+        setUserMenuOpen(
+          false
+        );
+
+        await shopifyLogout();
+
+        setToast({
+          type:
+            "success",
+
+          msg:
+            "Se ha cerrado la sesión.",
+        });
+      } catch (
+        error
+      ) {
+        console.error(
+          "Shopify logout failed:",
+          error
+        );
+
+        setToast({
+          type:
+            "error",
+
+          msg:
+            "No se pudo cerrar la sesión.",
+        });
+      }
+    };
+
+
+  /* ============================================================
+     SEARCH
+     ============================================================ */
 
   const [
     searchQuery,
     setSearchQuery,
-  ] = useState("");
+  ] =
+    useState("");
+
 
   const [
     items,
     setItems,
-  ] = useState<SuggestItem[]>([]);
+  ] =
+    useState<
+      SuggestItem[]
+    >([]);
+
 
   const [
     suggestOpen,
     setSuggestOpen,
-  ] = useState(false);
+  ] =
+    useState(false);
+
 
   const [
     suggestLoading,
     setSuggestLoading,
-  ] = useState(false);
+  ] =
+    useState(false);
 
-  // ============================================================
-  // TOAST
-  // ============================================================
+
+  const searchCatalogRef =
+    useRef<
+      SearchCatalogRow[] | null
+    >(null);
+
+
+  /* ============================================================
+     TOAST
+     ============================================================ */
 
   const [
     toast,
     setToast,
-  ] = useState<Toast>(null);
+  ] =
+    useState<Toast>(
+      null
+    );
 
-  // ============================================================
-  // ANIMACIÓN CARRITO
-  // ============================================================
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          setToast(
+            null
+          );
+        },
+        3500
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    toast,
+  ]);
+
+
+  /* ============================================================
+     CART ANIMATION
+     ============================================================ */
 
   const [
     cartBouncing,
     setCartBouncing,
-  ] = useState(false);
+  ] =
+    useState(false);
+
 
   const previousCartCountRef =
     useRef(0);
 
+
   const cartCountInitializedRef =
     useRef(false);
 
+
   const cartBounceTimerRef =
-    useRef<number | null>(
-      null
-    );
+    useRef<
+      number | null
+    >(null);
+
 
   useEffect(() => {
-    cartCountInitializedRef.current =
-      false;
-
-    previousCartCountRef.current =
-      cartItemCount;
-
-    setCartBouncing(false);
-  }, [isShopifyArea]);
-
-  useEffect(() => {
-    if (cartLoading) {
+    if (
+      cartLoading
+    ) {
       return;
     }
 
@@ -278,11 +582,15 @@ const Header: React.FC<{
       cartItemCount >
       previousCartCountRef.current
     ) {
-      setCartBouncing(false);
+      setCartBouncing(
+        false
+      );
 
       window.requestAnimationFrame(
         () => {
-          setCartBouncing(true);
+          setCartBouncing(
+            true
+          );
         }
       );
 
@@ -297,7 +605,9 @@ const Header: React.FC<{
       cartBounceTimerRef.current =
         window.setTimeout(
           () => {
-            setCartBouncing(false);
+            setCartBouncing(
+              false
+            );
 
             cartBounceTimerRef.current =
               null;
@@ -313,6 +623,7 @@ const Header: React.FC<{
     cartLoading,
   ]);
 
+
   useEffect(() => {
     return () => {
       if (
@@ -325,290 +636,80 @@ const Header: React.FC<{
     };
   }, []);
 
-  // ============================================================
-  // REFS
-  // ============================================================
+
+  /* ============================================================
+     REFS
+     ============================================================ */
 
   const userBtnRef =
-    useRef<HTMLButtonElement | null>(
-      null
-    );
-
-  const userMenuRef =
-    useRef<HTMLDivElement | null>(
-      null
-    );
-
-  const searchWrapRef =
-    useRef<HTMLFormElement | null>(
-      null
-    );
-
-  const searchCatalogRef =
     useRef<
-      SearchCatalogRow[] | null
+      HTMLButtonElement | null
     >(null);
 
-  // ============================================================
-  // TOAST
-  // ============================================================
 
-  useEffect(() => {
-    if (!toast) {
-      return;
-    }
+  const userMenuRef =
+    useRef<
+      HTMLDivElement | null
+    >(null);
 
-    const timer =
-      window.setTimeout(
-        () => {
-          setToast(null);
-        },
-        3500
-      );
 
-    return () => {
-      window.clearTimeout(
-        timer
-      );
-    };
-  }, [toast]);
+  const searchWrapRef =
+    useRef<
+      HTMLFormElement | null
+    >(null);
 
-  // ============================================================
-  // PERFIL LOCAL SUPABASE
-  // ============================================================
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadProfile =
-      async () => {
-        if (initializing) {
-          return;
-        }
-
-        if (!user) {
-          setProfile(null);
-          return;
-        }
-
-        const {
-          data,
-          error,
-        } =
-          await supabase
-            .from("profiles")
-            .select("*")
-            .eq(
-              "id",
-              user.id
-            )
-            .single();
-
-        if (cancelled) {
-          return;
-        }
-
-        if (error) {
-          console.error(
-            "Error profile:",
-            error.message
-          );
-
-          setProfile(null);
-        } else {
-          setProfile(data);
-        }
-      };
-
-    void loadProfile();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    user?.id,
-    initializing,
-  ]);
-
-  // ============================================================
-  // LOGOUT LOCAL / SUPABASE
-  // ============================================================
-
-  const handleLocalLogout =
-    async () => {
-      try {
-        await supabase.auth.signOut();
-      } catch (error) {
-        console.error(
-          "signOut local failed:",
-          error
-        );
-
-        setToast({
-          type: "error",
-          msg: "No se pudo cerrar la sesión local.",
-        });
-
-        return;
-      }
-
-      setUserMenuOpen(false);
-
-      const message: Exclude<
-        Toast,
-        null
-      > = {
-        type: "success",
-        msg: "Se ha cerrado la sesión local.",
-      };
-
-      setToast(message);
-
-      saveToastForNextPage(
-        message
-      );
-    };
-
-  // ============================================================
-  // LOGOUT SHOPIFY
-  // ============================================================
-
-  const handleShopifyLogout =
-    async () => {
-      try {
-        setUserMenuOpen(false);
-
-        await shopifyLogout();
-      } catch (error) {
-        console.error(
-          "Shopify logout failed:",
-          error
-        );
-
-        setToast({
-          type: "error",
-          msg: "No se pudo cerrar la sesión de Shopify.",
-        });
-      }
-    };
-
-  // ============================================================
-  // HELPERS BUSCADOR
-  // ============================================================
-
-  const uniq = (
-    values: string[]
-  ) =>
-    Array.from(
-      new Set(
-        values
-          .map((value) =>
-            value.trim()
-          )
-          .filter(Boolean)
-      )
-    );
-
-  const normalizeText = (
-    value: string
-  ) =>
-    value
-      .normalize("NFD")
-      .replace(
-        /[\u0300-\u036f]/g,
-        ""
-      )
-      .toLocaleLowerCase("es")
-      .trim();
-
-  function fullProductName(
-    product: {
-      name: string;
-      flavor: string | null;
-      size: string | null;
-    }
-  ) {
-    const base = (
-      product.name ?? ""
-    ).trim();
-
-    const flavor = (
-      product.flavor ?? ""
-    ).trim();
-
-    const size = (
-      product.size ?? ""
-    ).trim();
-
-    return [
-      base,
-      flavor,
-      size,
-    ]
-      .filter(Boolean)
-      .join(" ");
-  }
-
-  // ============================================================
-  // IR A PRODUCTO
-  // ============================================================
+  /* ============================================================
+     GO PRODUCT
+     ============================================================ */
 
   const goToProduct = (
-    product: ProductSuggestion
+    product:
+      ProductSuggestion
   ) => {
-    setSuggestOpen(false);
-    setUserMenuOpen(false);
-
-    const displayName =
-      fullProductName({
-        name: product.name,
-        flavor:
-          product.flavor,
-        size:
-          product.size,
-      });
-
-    setSearchQuery(
-      displayName
+    setSuggestOpen(
+      false
     );
 
-    const slug = (
-      product.slug ?? ""
-    ).trim();
+    setUserMenuOpen(
+      false
+    );
 
-    if (isShopifyArea) {
-      const params =
-        new URLSearchParams();
+    setSearchQuery(
+      fullProductName({
+        name:
+          product.name,
 
-      params.set(
-        "search",
-        displayName
-      );
+        variantLabel:
+          product.variantLabel,
+      })
+    );
 
-      navigate(
-        `${shoppingHref}?${params.toString()}#products`
-      );
-
-      return;
-    }
-
-    const target = slug
-      ? `/shopping/${slug}-${product.id}`
-      : `/shopping/${product.id}`;
-
-    navigate(target);
+    navigate(
+      `/tienda/${product.handle}`
+    );
   };
 
-  // ============================================================
-  // FILTRAR SHOPPING
-  // ============================================================
+
+  /* ============================================================
+     FILTER SHOP
+     ============================================================ */
 
   const goToFilteredShopping = (
-    kind: "category" | "brand",
-    value: string
+    kind:
+      | "category"
+      | "brand",
+
+    value:
+      string
   ) => {
-    setSuggestOpen(false);
-    setUserMenuOpen(false);
+    setSuggestOpen(
+      false
+    );
+
+    setUserMenuOpen(
+      false
+    );
 
     const params =
       new URLSearchParams();
@@ -619,60 +720,57 @@ const Header: React.FC<{
     );
 
     navigate(
-      `${shoppingHref}?${params.toString()}#products`
+      `/tienda?${params.toString()}#products`
     );
   };
 
-  // ============================================================
-  // SUBMIT BUSCADOR
-  // ============================================================
+
+  /* ============================================================
+     SEARCH SUBMIT
+     ============================================================ */
 
   const handleSearchSubmit = (
-    event: React.FormEvent
+    event:
+      React.FormEvent
   ) => {
     event.preventDefault();
 
     const query =
       searchQuery.trim();
 
-    if (!query) {
+    if (
+      !query
+    ) {
+      navigate(
+        "/tienda"
+      );
+
       return;
     }
 
     const normalizedQuery =
-      normalizeText(query);
+      normalizeText(
+        query
+      );
 
     const exactCategory =
       items.find(
-        (item) =>
+        (
+          item
+        ) =>
           item.kind ===
             "category" &&
           normalizeText(
             item.value
-          ) === normalizedQuery
-      ) as
-        | {
-            kind: "category";
-            value: string;
-          }
-        | undefined;
+          ) ===
+            normalizedQuery
+      );
 
-    const exactBrand =
-      items.find(
-        (item) =>
-          item.kind ===
-            "brand" &&
-          normalizeText(
-            item.value
-          ) === normalizedQuery
-      ) as
-        | {
-            kind: "brand";
-            value: string;
-          }
-        | undefined;
-
-    if (exactCategory) {
+    if (
+      exactCategory &&
+      exactCategory.kind ===
+        "category"
+    ) {
       goToFilteredShopping(
         "category",
         exactCategory.value
@@ -681,62 +779,27 @@ const Header: React.FC<{
       return;
     }
 
-    if (exactBrand) {
-      goToFilteredShopping(
-        "brand",
-        exactBrand.value
-      );
-
-      return;
-    }
-
-    const softCategory =
+    const exactBrand =
       items.find(
-        (item) =>
-          item.kind ===
-            "category" &&
-          normalizeText(
-            item.value
-          ).includes(
-            normalizedQuery
-          )
-      ) as
-        | {
-            kind: "category";
-            value: string;
-          }
-        | undefined;
-
-    const softBrand =
-      items.find(
-        (item) =>
+        (
+          item
+        ) =>
           item.kind ===
             "brand" &&
           normalizeText(
             item.value
-          ).includes(
+          ) ===
             normalizedQuery
-          )
-      ) as
-        | {
-            kind: "brand";
-            value: string;
-          }
-        | undefined;
-
-    if (softCategory) {
-      goToFilteredShopping(
-        "category",
-        softCategory.value
       );
 
-      return;
-    }
-
-    if (softBrand) {
+    if (
+      exactBrand &&
+      exactBrand.kind ===
+        "brand"
+    ) {
       goToFilteredShopping(
         "brand",
-        softBrand.value
+        exactBrand.value
       );
 
       return;
@@ -751,39 +814,48 @@ const Header: React.FC<{
     );
 
     navigate(
-      `${shoppingHref}?${params.toString()}#products`
+      `/tienda?${params.toString()}#products`
     );
 
-    setUserMenuOpen(false);
-    setSuggestOpen(false);
+    setUserMenuOpen(
+      false
+    );
+
+    setSuggestOpen(
+      false
+    );
   };
 
-  // ============================================================
-  // CARGAR SUGERENCIAS
-  // ============================================================
 
-  /*
-    TEMPORAL:
-    sigue leyendo los productos antiguos
-    de Supabase para el buscador.
+  /* ============================================================
+     LOAD SEARCH CATALOG FROM SHOPIFY
+     ============================================================ */
 
-    Después lo migraremos a Storefront API.
-  */
   useEffect(() => {
-    let alive = true;
+    let alive =
+      true;
 
     const query =
       searchQuery.trim();
 
     if (
-      query.length < 2
+      query.length <
+      2
     ) {
-      setItems([]);
-      setSuggestLoading(false);
+      setItems(
+        []
+      );
+
+      setSuggestLoading(
+        false
+      );
+
       return;
     }
 
-    setSuggestLoading(true);
+    setSuggestLoading(
+      true
+    );
 
     const timer =
       window.setTimeout(
@@ -792,111 +864,54 @@ const Header: React.FC<{
             if (
               !searchCatalogRef.current
             ) {
-              const {
-                data,
-                error,
-              } =
-                await supabase
-                  .from(
-                    "public_products"
-                  )
-                  .select(
-                    "id,name,slug,flavor,size,category,brand"
-                  )
-                  .order(
-                    "name",
-                    {
-                      ascending:
-                        true,
-                    }
-                  )
-                  .range(
-                    0,
-                    4999
-                  );
-
-              if (error) {
-                console.error(
-                  "Search catalog error:",
-                  error.message
-                );
-
-                if (alive) {
-                  setItems([]);
-                }
-
-                return;
-              }
+              const products =
+                await getAllShopifyProducts();
 
               searchCatalogRef.current =
-                (
-                  data ?? []
-                )
-                  .filter(
-                    (
-                      row: any
-                    ) =>
-                      row?.id !=
-                        null &&
-                      row?.name
-                  )
+                products
                   .map(
                     (
-                      row: any
-                    ) => ({
-                      id: Number(
-                        row.id
-                      ),
+                      product
+                    ): SearchCatalogRow => ({
+                      id:
+                        product.id,
 
                       name:
-                        String(
-                          row.name
+                        product.title ??
+                        "",
+
+                      handle:
+                        product.handle,
+
+                      variantLabel:
+                        getVariantLabel(
+                          product
                         ),
 
-                      slug:
-                        row.slug !=
-                        null
-                          ? String(
-                              row.slug
-                            )
-                          : null,
-
-                      flavor:
-                        row.flavor !=
-                        null
-                          ? String(
-                              row.flavor
-                            )
-                          : null,
-
-                      size:
-                        row.size !=
-                        null
-                          ? String(
-                              row.size
-                            )
-                          : null,
-
                       category:
-                        row.category !=
-                        null
-                          ? String(
-                              row.category
-                            )
-                          : null,
+                        product.productType ||
+                        null,
 
                       brand:
-                        row.brand !=
-                        null
-                          ? String(
-                              row.brand
-                            )
-                          : null,
+                        product.vendor ||
+                        null,
                     })
+                  )
+                  .filter(
+                    (
+                      row
+                    ) =>
+                      Boolean(
+                        row.id &&
+                        row.name &&
+                        row.handle
+                      )
                   );
             }
 
-            if (!alive) {
+            if (
+              !alive
+            ) {
               return;
             }
 
@@ -911,33 +926,32 @@ const Header: React.FC<{
 
             const matchingRows =
               catalog.filter(
-                (row) => {
-                  const searchableProductName =
-                    fullProductName(
-                      {
-                        name:
-                          row.name,
+                (
+                  row
+                ) => {
+                  const searchableName =
+                    fullProductName({
+                      name:
+                        row.name,
 
-                        flavor:
-                          row.flavor,
-
-                        size:
-                          row.size,
-                      }
-                    );
+                      variantLabel:
+                        row.variantLabel,
+                    });
 
                   return (
                     normalizeText(
-                      searchableProductName
+                      searchableName
                     ).includes(
                       normalizedQuery
                     ) ||
+
                     normalizeText(
                       row.category ??
                         ""
                     ).includes(
                       normalizedQuery
                     ) ||
+
                     normalizeText(
                       row.brand ??
                         ""
@@ -952,7 +966,9 @@ const Header: React.FC<{
               uniq(
                 matchingRows
                   .map(
-                    (row) =>
+                    (
+                      row
+                    ) =>
                       row.category ??
                       ""
                   )
@@ -975,7 +991,9 @@ const Header: React.FC<{
               uniq(
                 matchingRows
                   .map(
-                    (row) =>
+                    (
+                      row
+                    ) =>
                       row.brand ??
                       ""
                   )
@@ -994,23 +1012,21 @@ const Header: React.FC<{
                 6
               );
 
-            const products: SuggestItem[] =
+            const products:
+              SuggestItem[] =
               matchingRows
                 .filter(
-                  (row) =>
+                  (
+                    row
+                  ) =>
                     normalizeText(
-                      fullProductName(
-                        {
-                          name:
-                            row.name,
+                      fullProductName({
+                        name:
+                          row.name,
 
-                          flavor:
-                            row.flavor,
-
-                          size:
-                            row.size,
-                        }
-                      )
+                        variantLabel:
+                          row.variantLabel,
+                      })
                     ).includes(
                       normalizedQuery
                     )
@@ -1020,7 +1036,9 @@ const Header: React.FC<{
                   8
                 )
                 .map(
-                  (row) => ({
+                  (
+                    row
+                  ) => ({
                     kind:
                       "product",
 
@@ -1030,42 +1048,58 @@ const Header: React.FC<{
                     name:
                       row.name,
 
-                    slug:
-                      row.slug,
+                    handle:
+                      row.handle,
 
-                    flavor:
-                      row.flavor,
-
-                    size:
-                      row.size,
+                    variantLabel:
+                      row.variantLabel,
                   })
                 );
 
-            const categorySuggestionItems: SuggestItem[] =
-              categories.map(
-                (value) => ({
-                  kind:
-                    "category",
-                  value,
-                })
-              );
-
-            const brandSuggestionItems: SuggestItem[] =
-              brands.map(
-                (value) => ({
-                  kind:
-                    "brand",
-                  value,
-                })
-              );
-
             setItems([
-              ...categorySuggestionItems,
-              ...brandSuggestionItems,
+              ...categories.map(
+                (
+                  value
+                ) => ({
+                  kind:
+                    "category" as const,
+
+                  value,
+                })
+              ),
+
+              ...brands.map(
+                (
+                  value
+                ) => ({
+                  kind:
+                    "brand" as const,
+
+                  value,
+                })
+              ),
+
               ...products,
             ]);
+          } catch (
+            error
+          ) {
+            console.error(
+              "Shopify search catalog error:",
+              error
+            );
+
+            if (
+              alive
+            ) {
+              setItems(
+                []
+              );
+            }
           } finally {
-            if (alive) {
+            if (
+              alive
+            ) {
               setSuggestLoading(
                 false
               );
@@ -1076,55 +1110,70 @@ const Header: React.FC<{
       );
 
     return () => {
-      alive = false;
+      alive =
+        false;
 
       window.clearTimeout(
         timer
       );
     };
-  }, [searchQuery]);
+  }, [
+    searchQuery,
+  ]);
 
-  // ============================================================
-  // CERRAR BUSCADOR AL HACER CLIC FUERA
-  // ============================================================
+
+  /* ============================================================
+     CLOSE SEARCH
+     ============================================================ */
 
   useEffect(() => {
-    const handleMouseDown = (
-      event: MouseEvent
-    ) => {
-      const target =
-        event.target as
-          | Node
-          | null;
+    const handleMouseDown =
+      (
+        event:
+          MouseEvent
+      ) => {
+        const target =
+          event.target as
+            | Node
+            | null;
 
-      if (!target) {
-        return;
-      }
+        if (
+          !target
+        ) {
+          return;
+        }
 
-      const isInsideSearch =
-        searchWrapRef.current?.contains(
-          target
-        ) ?? false;
+        const isInsideSearch =
+          searchWrapRef.current?.contains(
+            target
+          ) ??
+          false;
 
-      if (!isInsideSearch) {
-        setSuggestOpen(
-          false
-        );
-      }
-    };
+        if (
+          !isInsideSearch
+        ) {
+          setSuggestOpen(
+            false
+          );
+        }
+      };
 
-    const handleKeyDown = (
-      event: KeyboardEvent
-    ) => {
-      if (
-        event.key ===
-        "Escape"
-      ) {
-        setSuggestOpen(
-          false
-        );
-      }
-    };
+
+    const handleKeyDown =
+      (
+        event:
+          KeyboardEvent
+      ) => {
+        if (
+          event.key ===
+          "Escape"
+        ) {
+          setSuggestOpen(
+            false
+          );
+        }
+      };
+
 
     window.addEventListener(
       "mousedown",
@@ -1135,6 +1184,7 @@ const Header: React.FC<{
       "keydown",
       handleKeyDown
     );
+
 
     return () => {
       window.removeEventListener(
@@ -1149,9 +1199,10 @@ const Header: React.FC<{
     };
   }, []);
 
-  // ============================================================
-  // CERRAR MENÚ USUARIO
-  // ============================================================
+
+  /* ============================================================
+     CLOSE USER MENU
+     ============================================================ */
 
   useEffect(() => {
     if (
@@ -1160,50 +1211,60 @@ const Header: React.FC<{
       return;
     }
 
-    const handleClickOutside = (
-      event: MouseEvent
-    ) => {
-      const target =
-        event.target as
-          | Node
-          | null;
+    const handleClickOutside =
+      (
+        event:
+          MouseEvent
+      ) => {
+        const target =
+          event.target as
+            | Node
+            | null;
 
-      if (!target) {
-        return;
-      }
+        if (
+          !target
+        ) {
+          return;
+        }
 
-      const isInsideMenu =
-        userMenuRef.current?.contains(
-          target
-        ) ?? false;
+        const isInsideMenu =
+          userMenuRef.current?.contains(
+            target
+          ) ??
+          false;
 
-      const isInsideButton =
-        userBtnRef.current?.contains(
-          target
-        ) ?? false;
+        const isInsideButton =
+          userBtnRef.current?.contains(
+            target
+          ) ??
+          false;
 
-      if (
-        !isInsideMenu &&
-        !isInsideButton
-      ) {
-        setUserMenuOpen(
-          false
-        );
-      }
-    };
+        if (
+          !isInsideMenu &&
+          !isInsideButton
+        ) {
+          setUserMenuOpen(
+            false
+          );
+        }
+      };
 
-    const handleEscape = (
-      event: KeyboardEvent
-    ) => {
-      if (
-        event.key ===
-        "Escape"
-      ) {
-        setUserMenuOpen(
-          false
-        );
-      }
-    };
+
+    const handleEscape =
+      (
+        event:
+          KeyboardEvent
+      ) => {
+        if (
+          event.key ===
+          "Escape"
+        ) {
+          setUserMenuOpen(
+            false
+          );
+        }
+      };
+
 
     window.addEventListener(
       "mousedown",
@@ -1214,6 +1275,7 @@ const Header: React.FC<{
       "keydown",
       handleEscape
     );
+
 
     return () => {
       window.removeEventListener(
@@ -1226,49 +1288,76 @@ const Header: React.FC<{
         handleEscape
       );
     };
-  }, [userMenuOpen]);
+  }, [
+    userMenuOpen,
+  ]);
 
-  // ============================================================
-  // SEPARAR SUGERENCIAS
-  // ============================================================
+
+  /* ============================================================
+     GROUP SUGGESTIONS
+     ============================================================ */
 
   const categoryItems =
     items.filter(
-      (item) =>
+      (
+        item
+      ) =>
         item.kind ===
         "category"
     ) as Array<{
-      kind: "category";
-      value: string;
+      kind:
+        "category";
+
+      value:
+        string;
     }>;
+
 
   const brandItems =
     items.filter(
-      (item) =>
+      (
+        item
+      ) =>
         item.kind ===
         "brand"
     ) as Array<{
-      kind: "brand";
-      value: string;
+      kind:
+        "brand";
+
+      value:
+        string;
     }>;
+
 
   const productItems =
     items.filter(
-      (item) =>
+      (
+        item
+      ) =>
         item.kind ===
         "product"
     ) as Array<{
-      kind: "product";
-      id: number;
-      name: string;
-      slug: string | null;
-      flavor: string | null;
-      size: string | null;
+      kind:
+        "product";
+
+      id:
+        string;
+
+      name:
+        string;
+
+      handle:
+        string;
+
+      variantLabel:
+        | string
+        | null;
     }>;
 
-  // ============================================================
-  // RENDER
-  // ============================================================
+
+  /* ============================================================
+     RENDER
+     ============================================================ */
 
   return (
     <>
@@ -1300,6 +1389,11 @@ const Header: React.FC<{
         }
       `}</style>
 
+
+      {/* ===================================================== */}
+      {/* TOAST */}
+      {/* ===================================================== */}
+
       {toast && (
         <div className="fixed right-4 top-4 z-[9999]">
           <div
@@ -1309,13 +1403,10 @@ const Header: React.FC<{
               toast.type ===
               "success"
                 ? "border-green-200 bg-green-50 text-green-900"
-                : "",
-
-              toast.type ===
-              "error"
-                ? "border-red-200 bg-red-50 text-red-900"
-                : "",
-            ].join(" ")}
+                : "border-red-200 bg-red-50 text-red-900",
+            ].join(
+              " "
+            )}
           >
             <div className="flex items-start gap-3">
               <div className="font-semibold">
@@ -1326,7 +1417,9 @@ const Header: React.FC<{
               </div>
 
               <div className="flex-1">
-                {toast.msg}
+                {
+                  toast.msg
+                }
               </div>
 
               <button
@@ -1346,30 +1439,51 @@ const Header: React.FC<{
         </div>
       )}
 
+
+      {/* ===================================================== */}
+      {/* HEADER */}
+      {/* ===================================================== */}
+
       <header
         className={[
-          "gris relative z-[1000] w-full overflow-visible bg-transparent px-5 py-2 md:px-6 md:py-3",
+          "relative z-[1000] mx-2 mb-2 mt-2 w-[calc(100%-1rem)] overflow-visible rounded-[1.35rem] border border-[#d7dfcf] bg-[#f8f7f2]/92 px-5 py-2 shadow-[0_8px_26px_rgba(47,67,31,0.10),inset_0_1px_0_rgba(255,255,255,0.88)] backdrop-blur-xl md:mx-3 md:mt-3 md:w-[calc(100%-1.5rem)] md:px-6 md:py-3",
 
           "font-sans text-gray-800",
 
           isHomePage
             ? [
                 "flex flex-col items-center gap-4",
+
                 "md:grid",
+
                 "md:grid-cols-[1fr_auto_1fr]",
+
                 "md:items-center",
+
                 "md:gap-6",
-              ].join(" ")
+              ].join(
+                " "
+              )
             : [
                 "flex flex-col items-center gap-4",
+
                 "md:grid",
+
                 "md:grid-cols-[auto_minmax(320px,1fr)_auto]",
+
                 "md:items-center",
+
                 "md:gap-8",
-              ].join(" "),
-        ].join(" ")}
+              ].join(
+                " "
+              ),
+        ].join(
+          " "
+        )}
       >
+        {/* ================================================= */}
         {/* LOGO */}
+        {/* ================================================= */}
 
         <Link
           to="/"
@@ -1377,16 +1491,21 @@ const Header: React.FC<{
             inline-flex items-center
             md:justify-self-start
           "
-          aria-label={title}
+          aria-label={
+            title
+          }
         >
           <img
-            src="https://uayblnybdrhhmumudbea.supabase.co/storage/v1/object/public/publicPictures/logo_2.png"
+              src={logoImg}
             alt="Saminatura"
             className="h-11 w-auto object-contain md:h-14"
           />
         </Link>
 
+
+        {/* ================================================= */}
         {/* CENTRO */}
+        {/* ================================================= */}
 
         <div
           className={[
@@ -1395,27 +1514,37 @@ const Header: React.FC<{
             isHomePage
               ? [
                   "justify-center",
+
                   "md:col-start-2",
+
                   "md:row-start-1",
+
                   "md:justify-self-center",
-                ].join(" ")
+                ].join(
+                  " "
+                )
               : [
                   "justify-center",
+
                   "md:justify-self-center",
-                ].join(" "),
-          ].join(" ")}
+                ].join(
+                  " "
+                ),
+          ].join(
+            " "
+          )}
         >
           {isHomePage ? (
             <nav
               className="
                 flex items-center justify-center
                 gap-1 rounded-full
-                border border-[#aebc8f]/70
-                bg-[#f2f5ea]/90
+                border border-white/75
+                bg-white/45
                 p-1
                 text-sm font-medium
-                shadow-[0_8px_24px_rgba(72,83,47,0.10)]
-                backdrop-blur-sm
+                shadow-[0_10px_30px_rgba(47,67,31,0.12),inset_0_1px_0_rgba(255,255,255,0.85)]
+                backdrop-blur-xl
                 md:gap-1.5 md:p-1.5 md:text-base
               "
             >
@@ -1434,8 +1563,9 @@ const Header: React.FC<{
                 Inicio
               </Link>
 
+
               <Link
-                to={shoppingHref}
+                to="/tienda"
                 className="
                   rounded-full px-5 py-2
                   text-[#2f3a1f]
@@ -1449,8 +1579,9 @@ const Header: React.FC<{
                 Comprar
               </Link>
 
+
               <Link
-                to="/tienda"
+                to="/Nuestratienda"
                 className="
                   rounded-full px-5 py-2.5
                   text-[#2f3a1f]
@@ -1465,6 +1596,10 @@ const Header: React.FC<{
               </Link>
             </nav>
           ) : (
+            /* ================================================= */
+            /* SEARCH */
+            /* ================================================= */
+
             <form
               ref={
                 searchWrapRef
@@ -1478,14 +1613,15 @@ const Header: React.FC<{
                 <div
                   className="
                     flex items-center rounded-full
-                    border border-[#aebc8f]/70
-                    bg-[#f2f5ea]/90
+                    border border-white/75
+                    bg-white/45
                     p-1 pl-6
-                    shadow-[0_8px_24px_rgba(72,83,47,0.10)]
-                    backdrop-blur-sm
-                    transition-all duration-200
+                    shadow-[0_10px_30px_rgba(47,67,31,0.12),inset_0_1px_0_rgba(255,255,255,0.85)]
+                    backdrop-blur-xl
+                    transition-all duration-300
                     focus-within:border-[#8fa064]
-                    focus-within:bg-[#f7f9f2]
+                    focus-within:bg-white/70
+                    focus-within:shadow-[0_14px_36px_rgba(47,67,31,0.16),inset_0_1px_0_rgba(255,255,255,0.9)]
                     md:p-1.5 md:pl-7
                   "
                 >
@@ -1499,21 +1635,24 @@ const Header: React.FC<{
                     onChange={(
                       event
                     ) => {
+                      const next =
+                        event.target.value;
+
                       setSearchQuery(
-                        event.target.value
+                        next
                       );
 
-                      const next =
-                        event.target.value.trim();
-
                       setSuggestOpen(
-                        next.length >=
+                        next
+                          .trim()
+                          .length >=
                           2
                       );
                     }}
                     onFocus={() => {
                       if (
-                        searchQuery.trim()
+                        searchQuery
+                          .trim()
                           .length >=
                         2
                       ) {
@@ -1534,6 +1673,7 @@ const Header: React.FC<{
                     "
                     autoComplete="off"
                   />
+
 
                   <button
                     type="submit"
@@ -1558,13 +1698,21 @@ const Header: React.FC<{
                   </button>
                 </div>
 
+
+                {/* ================================================= */}
+                {/* SEARCH SUGGESTIONS */}
+                {/* ================================================= */}
+
                 {suggestOpen &&
-                  (suggestLoading ||
+                  (
+                    suggestLoading ||
                     items.length >
                       0 ||
-                    searchQuery.trim()
+                    searchQuery
+                      .trim()
                       .length >=
-                      2) && (
+                      2
+                  ) && (
                     <div
                       className="
                         absolute left-0 right-0
@@ -1586,6 +1734,8 @@ const Header: React.FC<{
                         </div>
                       ) : (
                         <div className="max-h-72 overflow-auto">
+                          {/* CATEGORÍAS */}
+
                           {categoryItems.length >
                             0 && (
                             <div className="py-2">
@@ -1611,6 +1761,7 @@ const Header: React.FC<{
                                     className="flex w-full px-4 py-3 text-left text-sm hover:bg-gray-50"
                                   >
                                     Ver productos de{" "}
+
                                     <b>
                                       {
                                         category.value
@@ -1621,6 +1772,9 @@ const Header: React.FC<{
                               )}
                             </div>
                           )}
+
+
+                          {/* MARCAS */}
 
                           {brandItems.length >
                             0 && (
@@ -1647,6 +1801,7 @@ const Header: React.FC<{
                                     className="flex w-full px-4 py-3 text-left text-sm hover:bg-gray-50"
                                   >
                                     Ver productos de{" "}
+
                                     <b>
                                       {
                                         brand.value
@@ -1657,6 +1812,9 @@ const Header: React.FC<{
                               )}
                             </div>
                           )}
+
+
+                          {/* PRODUCTOS */}
 
                           {productItems.length >
                             0 && (
@@ -1681,9 +1839,13 @@ const Header: React.FC<{
                                     }
                                     className="flex w-full px-4 py-3 text-left text-sm hover:bg-gray-50"
                                   >
-                                    {fullProductName(
-                                      product
-                                    )}
+                                    {fullProductName({
+                                      name:
+                                        product.name,
+
+                                      variantLabel:
+                                        product.variantLabel,
+                                    })}
                                   </button>
                                 )
                               )}
@@ -1698,7 +1860,10 @@ const Header: React.FC<{
           )}
         </div>
 
+
+        {/* ================================================= */}
         {/* DERECHA */}
+        {/* ================================================= */}
 
         <div
           className="
@@ -1706,11 +1871,11 @@ const Header: React.FC<{
             flex items-center justify-center
             gap-1 overflow-visible
             rounded-full
-            border border-[#aebc8f]/70
-            bg-[#f2f5ea]/90
+            border border-white/75
+            bg-white/45
             p-1
-            shadow-[0_8px_24px_rgba(72,83,47,0.10)]
-            backdrop-blur-sm
+            shadow-[0_10px_30px_rgba(47,67,31,0.13),inset_0_1px_0_rgba(255,255,255,0.88)]
+            backdrop-blur-xl
             md:justify-self-end
             md:gap-1.5
             md:p-1.5
@@ -1725,15 +1890,17 @@ const Header: React.FC<{
                 Inicio
               </Link>
 
+
               <Link
-                to={shoppingHref}
+                to="/tienda"
                 className="rounded-full px-4 py-2 text-[#2f3a1f] hover:bg-white xl:px-5"
               >
                 Comprar
               </Link>
 
+
               <Link
-                to="/tienda"
+                to="/Nuestratienda"
                 className="rounded-full px-4 py-2 text-[#2f3a1f] hover:bg-white xl:px-5"
               >
                 Nosotros
@@ -1741,10 +1908,15 @@ const Header: React.FC<{
             </nav>
           )}
 
-          {/* CARRITO */}
+
+          {/* ================================================= */}
+          {/* CART */}
+          {/* ================================================= */}
 
           <Link
-            to={cartHref}
+            to={
+              cartHref
+            }
             className={`
               relative inline-flex h-[40px] w-[40px]
               items-center justify-center
@@ -1754,6 +1926,8 @@ const Header: React.FC<{
               hover:-translate-y-[2px]
               hover:bg-white
               hover:text-[#5f7138]
+              hover:shadow-[0_6px_16px_rgba(47,67,31,0.12)]
+
               ${
                 cartBouncing
                   ? "cart-bump"
@@ -1783,9 +1957,24 @@ const Header: React.FC<{
               />
             </svg>
 
+
             {cartItemCount >
               0 && (
-              <span className="pointer-events-none absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#00bf63] px-1.5 text-[11px] font-bold text-white shadow-md">
+              <span
+                className="
+                  pointer-events-none
+                  absolute -right-1 -top-1
+                  flex h-5 min-w-[20px]
+                  items-center justify-center
+                  rounded-full
+                  bg-[#00bf63]
+                  px-1.5
+                  text-[11px]
+                  font-bold
+                  text-white
+                  shadow-md
+                "
+              >
                 {cartItemCount >
                 99
                   ? "99+"
@@ -1794,7 +1983,10 @@ const Header: React.FC<{
             )}
           </Link>
 
-          {/* FAVORITOS */}
+
+          {/* ================================================= */}
+          {/* FAVORITES */}
+          {/* ================================================= */}
 
           <Link
             to="/favoritos"
@@ -1806,7 +1998,8 @@ const Header: React.FC<{
               transition-all duration-300
               hover:-translate-y-[2px]
               hover:bg-white
-              hover:text-[#5f7138]
+              hover:text-[#8c3342]
+              hover:shadow-[0_6px_16px_rgba(140,51,66,0.12)]
             "
             aria-label="Mis favoritos"
           >
@@ -1821,9 +2014,26 @@ const Header: React.FC<{
               />
             </svg>
 
+
+            {/* CONTADOR FAVORITOS */}
+
             {favoriteCount >
               0 && (
-              <span className="pointer-events-none absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#00bf63] px-1.5 text-[11px] font-bold text-white shadow-md">
+              <span
+                className="
+                  pointer-events-none
+                  absolute -right-1 -top-1
+                  flex h-5 min-w-[20px]
+                  items-center justify-center
+                  rounded-full
+                  bg-[#8c3342]
+                  px-1.5
+                  text-[11px]
+                  font-bold
+                  text-white
+                  shadow-md
+                "
+              >
                 {favoriteCount >
                 99
                   ? "99+"
@@ -1832,7 +2042,10 @@ const Header: React.FC<{
             )}
           </Link>
 
-          {/* USUARIO */}
+
+          {/* ================================================= */}
+          {/* USER */}
+          {/* ================================================= */}
 
           <div className="relative inline-flex">
             <button
@@ -1855,23 +2068,38 @@ const Header: React.FC<{
               }
               className={[
                 "inline-flex h-[42px] w-[42px]",
+
                 "items-center justify-center",
+
                 "rounded-full text-black",
+
                 "transition-all duration-200",
+
                 "hover:scale-105",
+
                 "hover:bg-white",
+
                 "hover:text-[#5f7138]",
+
                 "hover:shadow-sm",
+
                 "active:scale-95",
+
                 "focus:outline-none",
+
                 "focus:ring-2",
+
                 "focus:ring-[#00bf63]/60",
+
                 "focus:ring-offset-2",
 
-                shopifyLoggedIn
+                shopifyLoggedIn ||
+                adminLoggedIn
                   ? "ring-2 ring-[#00bf63]/70"
                   : "",
-              ].join(" ")}
+              ].join(
+                " "
+              )}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1885,6 +2113,11 @@ const Header: React.FC<{
               </svg>
             </button>
 
+
+            {/* ================================================= */}
+            {/* USER MENU */}
+            {/* ================================================= */}
+
             <div
               ref={
                 userMenuRef
@@ -1895,9 +2128,10 @@ const Header: React.FC<{
                 mt-2 min-w-[250px]
                 origin-top-right
                 rounded-2xl
-                border border-[#aebc8f]/70
+                border border-white/80
                 bg-white
-                shadow-[0_18px_45px_rgba(47,58,31,0.20)]
+                shadow-[0_20px_55px_rgba(47,58,31,0.20),inset_0_1px_0_rgba(255,255,255,0.9)]
+                
                 transition-all duration-150
 
                 ${
@@ -1907,15 +2141,14 @@ const Header: React.FC<{
                 }
               `}
             >
-              {/* ============================= */}
-              {/* CUENTA SHOPIFY */}
-              {/* ============================= */}
+              {/* CUSTOMER */}
 
               <div className="px-4 pb-2 pt-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                  Cuenta Shopify
+                  Mi cuenta
                 </p>
               </div>
+
 
               <div className="px-1 pb-2">
                 {shopifyCustomerLoading ? (
@@ -1928,8 +2161,11 @@ const Header: React.FC<{
                       Sesión iniciada
                     </div>
 
+
                     <Link
-                      to="/perfil-shopify-test"
+                      to={
+                        CUSTOMER_PROFILE_HREF
+                      }
                       role="menuitem"
                       onClick={() =>
                         setUserMenuOpen(
@@ -1945,8 +2181,9 @@ const Header: React.FC<{
                         hover:text-white
                       "
                     >
-                      Mi perfil Shopify
+                      Mi perfil
                     </Link>
+
 
                     <button
                       type="button"
@@ -1963,12 +2200,14 @@ const Header: React.FC<{
                         hover:text-white
                       "
                     >
-                      Cerrar sesión Shopify
+                      Cerrar sesión
                     </button>
                   </>
                 ) : (
                   <Link
-                    to="/usuario-shopify-test"
+                    to={
+                      CUSTOMER_LOGIN_HREF
+                    }
                     role="menuitem"
                     onClick={() =>
                       setUserMenuOpen(
@@ -1985,36 +2224,37 @@ const Header: React.FC<{
                       hover:text-white
                     "
                   >
-                    Iniciar sesión Shopify
+                    Iniciar sesión
                   </Link>
                 )}
               </div>
 
-              {/* ============================= */}
-              {/* ACCESO LOCAL TEMPORAL */}
-              {/* ============================= */}
+
+              {/* ADMIN */}
 
               <div className="border-t border-gray-200" />
 
               <div className="px-4 pb-2 pt-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                  Acceso local / administración
+                  Administración
                 </p>
               </div>
 
+
               <div className="px-1 pb-2">
-                {initializing ? (
+                {adminLoading ? (
                   <div className="px-3 py-2 text-sm text-gray-400">
-                    Comprobando acceso local…
+                    Comprobando acceso…
                   </div>
-                ) : user ? (
+                ) : adminLoggedIn ? (
                   <>
-                    <div className="mx-2 mb-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                      Sesión local activa
+                    <div className="mx-2 mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                      Sesión admin activa
                     </div>
 
+
                     <Link
-                      to="/perfil"
+                      to="/admin/shopify"
                       role="menuitem"
                       onClick={() =>
                         setUserMenuOpen(
@@ -2024,81 +2264,60 @@ const Header: React.FC<{
                       className="
                         flex w-full items-center
                         rounded-md px-3 py-2
-                        text-sm text-gray-700
+                        text-sm font-semibold
+                        text-red-600
                         transition-colors
-                        hover:bg-gray-100
+                        hover:bg-[#00bf63]
+                        hover:text-white
                       "
                     >
-                      Perfil local
+                      Pedidos / Postventa
                     </Link>
 
-                    {profile?.is_admin && (
-                      <>
-                        <Link
-                          to="/admin/pedidos"
-                          role="menuitem"
-                          onClick={() =>
-                            setUserMenuOpen(
-                              false
-                            )
-                          }
-                          className="
-                            flex w-full items-center
-                            rounded-md px-3 py-2
-                            text-sm font-semibold
-                            text-red-600
-                            transition-colors
-                            hover:bg-[#00bf63]
-                            hover:text-white
-                          "
-                        >
-                          Pedidos
-                        </Link>
 
-                        <Link
-                          to="/modificarproductos"
-                          role="menuitem"
-                          onClick={() =>
-                            setUserMenuOpen(
-                              false
-                            )
-                          }
-                          className="
-                            flex w-full items-center
-                            rounded-md px-3 py-2
-                            text-sm font-semibold
-                            text-red-600
-                            transition-colors
-                            hover:bg-[#00bf63]
-                            hover:text-white
-                          "
-                        >
-                          Modificar productos
-                        </Link>
-                      </>
-                    )}
+                    <Link
+                      to="/admin/shopify/Productos"
+                      role="menuitem"
+                      onClick={() =>
+                        setUserMenuOpen(
+                          false
+                        )
+                      }
+                      className="
+                        flex w-full items-center
+                        rounded-md px-3 py-2
+                        text-sm font-semibold
+                        text-red-600
+                        transition-colors
+                        hover:bg-[#00bf63]
+                        hover:text-white
+                      "
+                    >
+                      Productos
+                    </Link>
+
 
                     <button
                       type="button"
                       role="menuitem"
                       onClick={() => {
-                        void handleLocalLogout();
+                        void handleAdminLogout();
                       }}
                       className="
                         flex w-full items-center
                         rounded-md px-3 py-2
-                        text-sm text-gray-500
+                        text-sm text-gray-600
                         transition-colors
                         hover:bg-gray-100
                         hover:text-gray-900
                       "
                     >
-                      Cerrar sesión local
+                      Cerrar sesión admin
                     </button>
                   </>
                 ) : (
                   <Link
-                    to="/usuario"
+                    to="/admin/login"
                     role="menuitem"
                     onClick={() =>
                       setUserMenuOpen(
@@ -2114,13 +2333,18 @@ const Header: React.FC<{
                       hover:text-gray-900
                     "
                   >
-                    Entrar con acceso local
+                    Acceso administración
                   </Link>
                 )}
               </div>
             </div>
           </div>
         </div>
+
+
+        {/* ================================================= */}
+        {/* MOBILE NAV */}
+        {/* ================================================= */}
 
         {!isHomePage && (
           <nav
@@ -2139,15 +2363,17 @@ const Header: React.FC<{
               Inicio
             </Link>
 
+
             <Link
-              to={shoppingHref}
+              to="/tienda"
               className="transition-colors hover:text-green-600"
             >
               Comprar
             </Link>
 
+
             <Link
-              to="/tienda"
+              to="/Nuestratienda"
               className="transition-colors hover:text-green-600"
             >
               Nosotros
@@ -2158,5 +2384,6 @@ const Header: React.FC<{
     </>
   );
 };
+
 
 export default Header;

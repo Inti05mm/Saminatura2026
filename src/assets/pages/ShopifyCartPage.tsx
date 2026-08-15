@@ -2,6 +2,10 @@ import Header from "../containers/Header";
 import Footer from "../containers/Footer";
 
 import {
+  useState,
+} from "react";
+
+import {
   useShopifyCart,
 } from "../containers/ShopifyCartContext";
 
@@ -88,6 +92,18 @@ export default function ShopifyCartPage() {
   const navigate =
     useNavigate();
 
+  const [
+    termsAccepted,
+    setTermsAccepted,
+  ] =
+    useState(false);
+
+  const [
+    termsError,
+    setTermsError,
+  ] =
+    useState(false);
+
   const {
     cart,
     loading,
@@ -102,6 +118,16 @@ export default function ShopifyCartPage() {
   const lines =
     cart?.lines.nodes ??
     [];
+
+  const handleCheckout = () => {
+    if (!termsAccepted) {
+      setTermsError(true);
+      return;
+    }
+
+    setTermsError(false);
+    goToCheckout();
+  };
 
   /* ============================================================
      LOADING
@@ -156,7 +182,7 @@ export default function ShopifyCartPage() {
               type="button"
               onClick={() =>
                 navigate(
-                  "/shopping-shopify-test"
+                  "/tienda"
                 )
               }
               className="cursor-pointer rounded-[43px] bg-[#f2f2f2] px-8 py-3.5 text-sm font-semibold leading-[16px] text-[#4c4c4c] transition hover:bg-[#e8e8e8]"
@@ -295,7 +321,7 @@ export default function ShopifyCartPage() {
                               type="button"
                               onClick={() =>
                                 navigate(
-                                  `/shopping-shopify-test/${product.handle}`
+                                  `/tienda/${product.handle}`
                                 )
                               }
                               className="group flex items-center gap-4 text-left"
@@ -526,7 +552,7 @@ export default function ShopifyCartPage() {
                           type="button"
                           onClick={() =>
                             navigate(
-                              "/shopping-shopify-test"
+                              "/tienda"
                             )
                           }
                           className="cursor-pointer rounded-[43px] bg-[#f2f2f2] px-8 py-3.5 text-sm font-semibold leading-[16px] text-[#4c4c4c] transition hover:bg-[#e8e8e8]"
@@ -602,7 +628,7 @@ export default function ShopifyCartPage() {
                           type="button"
                           onClick={() =>
                             navigate(
-                              `/shopping-shopify-test/${product.handle}`
+                              `/tienda/${product.handle}`
                             )
                           }
                           className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white"
@@ -635,7 +661,7 @@ export default function ShopifyCartPage() {
                             type="button"
                             onClick={() =>
                               navigate(
-                                `/shopping-shopify-test/${product.handle}`
+                                `/tienda/${product.handle}`
                               )
                             }
                             className="mt-1 block text-left"
@@ -767,7 +793,7 @@ export default function ShopifyCartPage() {
                   type="button"
                   onClick={() =>
                     navigate(
-                      "/shopping-shopify-test"
+                      "/tienda"
                     )
                   }
                   className="rounded-full bg-[#f2f2f2] px-5 py-3 text-sm font-semibold text-[#4c4c4c]"
@@ -871,6 +897,74 @@ export default function ShopifyCartPage() {
 
             {/* CHECKOUT */}
 
+            <div
+              className={`mt-5 rounded-xl border p-4 transition ${
+                termsError
+                  ? "border-red-300 bg-red-50"
+                  : "border-gray-200 bg-[#fafbf8]"
+              }`}
+            >
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={
+                    termsAccepted
+                  }
+                  onChange={(event) => {
+                    setTermsAccepted(
+                      event.target.checked
+                    );
+
+                    if (
+                      event.target.checked
+                    ) {
+                      setTermsError(
+                        false
+                      );
+                    }
+                  }}
+                  className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer accent-[#425530]"
+                />
+
+                <span className="text-sm leading-5 text-gray-600">
+                  He leído y acepto las{" "}
+                  <a
+                    href="/legal/condiciones-compra"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-[#425530] underline underline-offset-2 hover:text-[#344526]"
+                    onClick={(event) =>
+                      event.stopPropagation()
+                    }
+                  >
+                    Condiciones de contratación
+                  </a>{" "}
+                  y la{" "}
+                  <a
+                    href="/legal/envios-devoluciones"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-[#425530] underline underline-offset-2 hover:text-[#344526]"
+                    onClick={(event) =>
+                      event.stopPropagation()
+                    }
+                  >
+                    Política de devoluciones
+                  </a>
+                  .
+                </span>
+              </label>
+
+              {termsError && (
+                <p
+                  role="alert"
+                  className="mt-3 text-sm font-medium text-red-700"
+                >
+                  Debes aceptar las condiciones antes de continuar al pago.
+                </p>
+              )}
+            </div>
+
             <button
               type="button"
               disabled={
@@ -881,10 +975,10 @@ export default function ShopifyCartPage() {
                   0
               }
               onClick={
-                goToCheckout
+                handleCheckout
               }
               className="
-                mt-5
+                mt-4
                 w-full
                 rounded-[44px]
                 bg-[#00b206]

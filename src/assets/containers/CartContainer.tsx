@@ -582,7 +582,7 @@ export default function CartPage() {
 
   const openProduct = (p: Product) => {
     const s = (p.slug ?? "").trim();
-    navigate(`/shopping/${s ? `${s}-${p.id}` : p.id}`);
+    navigate(`/tienda/${s ? `${s}-${p.id}` : p.id}`);
   };
 
   const closeMoveToFavorites = () => {
@@ -900,7 +900,7 @@ export default function CartPage() {
         <p className="text-center mt-10 text-gray-600 dark:text-gray-200">Tu cesta está vacía.</p>
         <div className="flex justify-center mt-6">
           <button
-            onClick={() => navigate("/shopping")}
+            onClick={() => navigate("/tienda")}
             className="px-8 cursor-pointer py-3.5 bg-[#f2f2f2] rounded-[43px] text-[#4c4c4c] text-sm font-semibold leading-[16px]"
           >
             Return to shop
@@ -1119,7 +1119,7 @@ export default function CartPage() {
                     <tr className="border-t border-gray-200">
                       <td className="px-2 py-4" colSpan={3}>
                         <button
-                          onClick={() => navigate("/shopping")}
+                          onClick={() => navigate("/tienda")}
                           className="px-8 cursor-pointer py-3.5 bg-[#f2f2f2] rounded-[43px] text-[#4c4c4c] text-sm font-semibold leading-[16px]"
                         >
                           Return to shop

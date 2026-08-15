@@ -77,10 +77,11 @@ type OrdersResponse = {
   error?: string;
 };
 
-const API_BASE =
+const FIRESOFT_API_BASE =
   import.meta.env.VITE_FIRESOFT_API_URL?.trim() ||
   "http://localhost:8000";
 
+const SHOPIFY_API_BASE = "/api";
 const PAGE_SIZE = 15;
 
 const formatEUR = (
@@ -412,7 +413,7 @@ export default function AdminOrdersManager() {
       try {
         const response =
           await fetch(
-            `${API_BASE}/shopify/admin/orders?first=100&status=all`,
+            `${SHOPIFY_API_BASE}/shopify/admin/orders?first=100&status=all`,
             {
               method: "GET",
               headers: {
@@ -634,7 +635,7 @@ export default function AdminOrdersManager() {
     ) => {
       const response =
         await fetch(
-          `${API_BASE}/shopify/admin/orders/${numericId}`
+          `${SHOPIFY_API_BASE}/shopify/admin/orders/${numericId}`
         );
 
       const data =
@@ -687,7 +688,7 @@ export default function AdminOrdersManager() {
       try {
         const response =
           await fetch(
-            `${API_BASE}/shopify/admin/orders/${selectedOrder.numeric_id}/mark-processed`,
+            `${FIRESOFT_API_BASE}/shopify/admin/orders/${selectedOrder.numeric_id}/mark-processed`,
             {
               method: "POST",
               headers: {
@@ -769,7 +770,7 @@ export default function AdminOrdersManager() {
       try {
         const response =
           await fetch(
-            `${API_BASE}/shopify/admin/orders/${selectedOrder.numeric_id}/mark-pending`,
+            `${FIRESOFT_API_BASE}/shopify/admin/orders/${selectedOrder.numeric_id}/mark-pending`,
             {
               method: "POST",
               headers: {
@@ -940,7 +941,9 @@ export default function AdminOrdersManager() {
           <div className="mt-2 text-xs">
             API usada:{" "}
             <span className="font-mono">
-              {API_BASE}
+              Shopify API: {SHOPIFY_API_BASE}
+<br />
+FireSoft API: {FIRESOFT_API_BASE}
             </span>
           </div>
         </div>

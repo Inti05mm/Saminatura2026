@@ -44,6 +44,9 @@ export type ShopifyCatalogProduct = {
   vegan: { value: string } | null;
   glutenFree: { value: string } | null;
   lactoseFree: { value: string } | null;
+
+  promoType: { value: string } | null;
+  promoActive: { value: string } | null;
 };
 
 type ProductsResponse = {
@@ -57,7 +60,10 @@ type ProductsResponse = {
 };
 
 const PRODUCTS_QUERY = `
-  query Products($first: Int!, $after: String) {
+  query Products(
+    $first: Int!,
+    $after: String
+  ) {
     products(
       first: $first
       after: $after
@@ -105,6 +111,20 @@ const PRODUCTS_QUERY = `
           value
         }
 
+        promoType: metafield(
+          namespace: "custom"
+          key: "promo_type"
+        ) {
+          value
+        }
+
+        promoActive: metafield(
+          namespace: "custom"
+          key: "promo_active"
+        ) {
+          value
+        }
+
         variants(first: 100) {
           nodes {
             id
@@ -147,7 +167,7 @@ export async function getAllShopifyProducts() {
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const data: ProductsResponse =
+    const data =
       await shopifyFetch<ProductsResponse>(
         PRODUCTS_QUERY,
         {
@@ -156,13 +176,17 @@ export async function getAllShopifyProducts() {
         }
       );
 
-    all.push(...data.products.nodes);
+    all.push(
+      ...data.products.nodes
+    );
 
     hasNextPage =
-      data.products.pageInfo.hasNextPage;
+      data.products.pageInfo
+        .hasNextPage;
 
     after =
-      data.products.pageInfo.endCursor;
+      data.products.pageInfo
+        .endCursor;
   }
 
   return all;

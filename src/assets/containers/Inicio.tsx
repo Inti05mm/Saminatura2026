@@ -8,23 +8,24 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../supabaseClient";
 import heroImg from "../pictures/fainall.png";
 
+import {
+  getAllShopifyProducts,
+} from "../../shopifyCatalog";
+
 type ProductSuggestion = {
-  id: number;
+  id: string;
   name: string;
-  slug: string | null;
-  flavor: string | null;
-  size: string | null;
+  handle: string;
+  variantTitle: string | null;
 };
 
 type SearchCatalogRow = {
-  id: number;
+  id: string;
   name: string;
-  slug: string | null;
-  flavor: string | null;
-  size: string | null;
+  handle: string;
+  variantTitle: string | null;
   category: string | null;
   brand: string | null;
 };
@@ -40,11 +41,10 @@ type SuggestItem =
     }
   | {
       kind: "product";
-      id: number;
+      id: string;
       name: string;
-      slug: string | null;
-      flavor: string | null;
-      size: string | null;
+      handle: string;
+      variantTitle: string | null;
     };
 
 export default function HeroSaminatura() {
@@ -88,14 +88,18 @@ export default function HeroSaminatura() {
 
   const fullProductName = (product: {
     name: string;
-    flavor: string | null;
-    size: string | null;
+    variantTitle: string | null;
   }) => {
     const base = (product.name ?? "").trim();
-    const flavor = (product.flavor ?? "").trim();
-    const size = (product.size ?? "").trim();
+    const variantTitle =
+      (product.variantTitle ?? "").trim();
 
-    return [base, flavor, size]
+    const cleanVariantTitle =
+      variantTitle.toLowerCase() === "default title"
+        ? ""
+        : variantTitle;
+
+    return [base, cleanVariantTitle]
       .filter(Boolean)
       .join(" ");
   };
@@ -108,18 +112,13 @@ export default function HeroSaminatura() {
     setSearchQuery(
       fullProductName({
         name: product.name,
-        flavor: product.flavor,
-        size: product.size,
+        variantTitle: product.variantTitle,
       })
     );
 
-    const slug = (product.slug ?? "").trim();
-
-    const target = slug
-      ? `/shopping/${slug}-${product.id}`
-      : `/shopping/${product.id}`;
-
-    navigate(target);
+    navigate(
+      `/tienda/${product.handle}`
+    );
   };
 
   const goToFilteredShopping = (
@@ -132,7 +131,7 @@ export default function HeroSaminatura() {
     params.set(kind, value);
 
     navigate(
-      `/shopping?${params.toString()}#products`
+      `/tienda?${params.toString()}#products`
     );
   };
 
@@ -144,7 +143,7 @@ export default function HeroSaminatura() {
     const query = searchQuery.trim();
 
     if (!query) {
-      navigate("/shopping");
+      navigate("/tienda");
       return;
     }
 
@@ -236,7 +235,7 @@ export default function HeroSaminatura() {
     params.set("search", query);
 
     navigate(
-      `/shopping?${params.toString()}#products`
+      `/tienda?${params.toString()}#products`
     );
 
     setSuggestOpen(false);
@@ -258,65 +257,41 @@ export default function HeroSaminatura() {
     const timer = window.setTimeout(async () => {
       try {
         if (!searchCatalogRef.current) {
-          const { data, error } = await supabase
-            .from("public_products")
-            .select(
-              "id,name,slug,flavor,size,category,brand"
-            )
-            .order("name", {
-              ascending: true,
-            })
-            .range(0, 4999);
+          const shopifyProducts =
+            await getAllShopifyProducts();
 
-          if (error) {
-            console.error(
-              "Search catalog error:",
-              error.message
-            );
-
-            if (alive) {
-              setItems([]);
-            }
-
-            return;
-          }
-
-          searchCatalogRef.current = (
-            data ?? []
-          )
-            .filter(
-              (row: any) =>
-                row?.id != null && row?.name
-            )
-            .map((row: any) => ({
-              id: Number(row.id),
-              name: String(row.name),
-
-              slug:
-                row.slug != null
-                  ? String(row.slug)
-                  : null,
-
-              flavor:
-                row.flavor != null
-                  ? String(row.flavor)
-                  : null,
-
-              size:
-                row.size != null
-                  ? String(row.size)
-                  : null,
-
-              category:
-                row.category != null
-                  ? String(row.category)
-                  : null,
-
-              brand:
-                row.brand != null
-                  ? String(row.brand)
-                  : null,
-            }));
+          searchCatalogRef.current =
+            shopifyProducts
+              .flatMap((product) =>
+                (product.variants.nodes ?? []).map(
+                  (variant) => ({
+                    id: variant.id,
+                    name: product.title,
+                    handle: product.handle,
+                    variantTitle:
+                      variant.title ?? null,
+                    category:
+                      product.productType || null,
+                    brand:
+                      product.vendor || null,
+                  })
+                )
+              )
+              .filter(
+                (row) =>
+                  Boolean(row.id) &&
+                  Boolean(row.name) &&
+                  Boolean(row.handle)
+              )
+              .sort((first, second) =>
+                fullProductName(first).localeCompare(
+                  fullProductName(second),
+                  "es",
+                  {
+                    sensitivity: "base",
+                  }
+                )
+              );
         }
 
         if (!alive) return;
@@ -332,8 +307,7 @@ export default function HeroSaminatura() {
             const searchableProductName =
               fullProductName({
                 name: row.name,
-                flavor: row.flavor,
-                size: row.size,
+                variantTitle: row.variantTitle,
               });
 
             return (
@@ -376,8 +350,7 @@ export default function HeroSaminatura() {
               normalizeText(
                 fullProductName({
                   name: row.name,
-                  flavor: row.flavor,
-                  size: row.size,
+                  variantTitle: row.variantTitle,
                 })
               ).includes(normalizedQuery)
             )
@@ -386,9 +359,8 @@ export default function HeroSaminatura() {
               kind: "product",
               id: row.id,
               name: row.name,
-              slug: row.slug,
-              flavor: row.flavor,
-              size: row.size,
+              handle: row.handle,
+              variantTitle: row.variantTitle,
             }));
 
         const categorySuggestionItems: SuggestItem[] =
@@ -408,6 +380,15 @@ export default function HeroSaminatura() {
           ...brandSuggestionItems,
           ...products,
         ]);
+      } catch (error) {
+        console.error(
+          "Error cargando el buscador Shopify:",
+          error
+        );
+
+        if (alive) {
+          setItems([]);
+        }
       } finally {
         if (alive) {
           setSuggestLoading(false);
@@ -487,11 +468,10 @@ export default function HeroSaminatura() {
     (item) => item.kind === "product"
   ) as Array<{
     kind: "product";
-    id: number;
+    id: string;
     name: string;
-    slug: string | null;
-    flavor: string | null;
-    size: string | null;
+    handle: string;
+    variantTitle: string | null;
   }>;
 
   return (
@@ -736,9 +716,8 @@ export default function HeroSaminatura() {
                               const label =
                                 fullProductName({
                                   name: product.name,
-                                  flavor:
-                                    product.flavor,
-                                  size: product.size,
+                                  variantTitle:
+                                    product.variantTitle,
                                 });
 
                               return (
@@ -749,10 +728,9 @@ export default function HeroSaminatura() {
                                     goToProduct({
                                       id: product.id,
                                       name: product.name,
-                                      slug: product.slug,
-                                      flavor:
-                                        product.flavor,
-                                      size: product.size,
+                                      handle: product.handle,
+                                      variantTitle:
+                                        product.variantTitle,
                                     })
                                   }
                                   className="flex w-full items-center justify-between gap-4 px-5 py-3 text-left text-sm transition hover:bg-gray-50"
@@ -778,7 +756,7 @@ export default function HeroSaminatura() {
 
           <button
             type="button"
-            onClick={() => navigate("/shopping")}
+            onClick={() => navigate("/tienda")}
             className="
               mt-5 flex
               items-center justify-center
@@ -815,3 +793,4 @@ export default function HeroSaminatura() {
     </section>
   );
 }
+  

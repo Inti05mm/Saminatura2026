@@ -359,7 +359,7 @@ export default function Categories() {
                     const categoryQuery = toCategoryQuery(category.name)
 
                     navigate(
-                      `/shopping?category=${encodeURIComponent(
+                      `/tienda?category=${encodeURIComponent(
                         categoryQuery
                       )}`
                     )

@@ -35,7 +35,7 @@ export default function DietaryOptions() {
   const navigate = useNavigate()
 
   const openOption = (query: string) => {
-    navigate(`/shopping?${query}`)
+    navigate(`/tienda?${query}`)
   }
 
   return (

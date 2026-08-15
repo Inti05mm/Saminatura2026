@@ -254,14 +254,21 @@ export default function CondicionesCompraPage() {
         <h2>6. Pago</h2>
 
         <p>
-          Los pagos online podrán ser procesados mediante Stripe u
-          otros métodos de pago que Saminatura pueda incorporar.
-        </p>
+  Los pagos online se procesan de forma segura mediante el
+  checkout de Shopify y los proveedores de pago disponibles
+  en cada momento.
+</p>
 
-        <p>
-          La disponibilidad de cada método de pago será indicada
-          durante el proceso de compra.
-        </p>
+<p>
+  Los métodos de pago disponibles, así como cualquier
+  información relevante asociada al pago, se mostrarán antes
+  de confirmar el pedido.
+</p>
+
+<p>
+  Saminatura no almacena los datos completos de las tarjetas
+  bancarias utilizadas durante el pago.
+</p>
       </section>
 
       {/* 7 */}

@@ -138,10 +138,10 @@ function getProductPath(p: any) {
       ? slug
       : `${slug}${suffix}`;
 
-    return `/shopping/${finalSlug}`;
+    return `/tienda/${finalSlug}`;
   }
 
-  return "/shopping";
+  return "/tienda";
 }
 
 type PaginationItem =
@@ -392,7 +392,7 @@ const AllProductsGrid: React.FC<Props> = ({
         ? getProductPath(
             currentProduct
           )
-        : "/shopping",
+        : "/tienda",
     },
   });
 };
